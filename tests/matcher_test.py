@@ -73,6 +73,7 @@ class TestMatcher(unittest.TestCase):
         self.assertEqual(result, expected)
 
     def test_match(self):
+
         narration = "Amazon.com*MA4TS16T0"
         tx = Transaction(
             narration=narration,
@@ -161,6 +162,20 @@ AMAZON_RULE = {
         }
     }
 }
+from beancount.parser.parser import parse_many
+TEST_ENTIRES = parse_many("""
+2020-04-08 ! "AMZN Mktp US*L08746BB3"
+  match-key: "2020040824692160098100992944500"
+  ofx-type: "DEBIT"
+  * Liabilities:CreditCard:Chase:Amazon  -39.98 USD
+  ! Expenses:FIXME                        39.98 USD
+
+2019-09-11 ! "Deposit - AIRBNB PAYMENTS"
+  match-key: "201909110615000000000"
+  ofx-type: "CREDIT"
+  * Assets:Banking:NFCU:Checking   1039.80 USD
+  ! Income:Unmatched              -1039.80 USD
+""")
 
 if __name__ == '__main__':
     import logging, sys

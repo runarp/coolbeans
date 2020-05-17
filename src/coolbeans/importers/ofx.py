@@ -16,11 +16,6 @@ from ofxtools.models.bank.stmt import CCSTMTRS, STMTTRN
 from coolbeans import matcher
 
 
-def parse_file(file_name):
-    """Wrapper callback for file cache"""
-    return parser.parse(file_name)
-
-
 class Importer(importer.ImporterProtocol):
 
     def __init__(
@@ -34,7 +29,7 @@ class Importer(importer.ImporterProtocol):
         self.base_name = base_name
 
     def name(self):
-        return f"{self.base_name}.Importer"
+        return f"coolbeans.ofx"
 
     def auto_cofigure(self):
         """Pull the base configuration out of the Meta for the account:
@@ -94,13 +89,6 @@ class Importer(importer.ImporterProtocol):
     def file_name(self, file):
         return f"{self.base_name}.ofx"
 
-    #def find_existing(self, existing_entries:list):
-    #    matches = {}
-    #    for entry in existing_entries:
-    #        if 'ofx-fitid' in entry.meta:
-    #            matches[entry.meta['ofx-fitid']] = entry
-    #    return matches
-
     def find_existing(self, existing_entries:list, key, _type=None):
         matches = {}
         if not existing_entries:
@@ -131,6 +119,8 @@ class Importer(importer.ImporterProtocol):
         if statement.transactions:
             last_tx = statement.transactions[-1]
             bal_datetime = last_tx.dtposted
+        else:
+            return []
 
         currency = statement.curdef
         bal_date = datetime.date(
@@ -193,7 +183,7 @@ class Importer(importer.ImporterProtocol):
         statement = self._parse_statement(file)
         card_account = self.accounts['root']
 
-        match_key = 'ofx-fitid'
+        match_key = 'match-key'
 
         # Exiting Entries
         entries_by_id = self.find_existing(existing_entries, match_key)

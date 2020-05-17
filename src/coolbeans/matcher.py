@@ -14,19 +14,40 @@ match.yaml
       - r"(?P<payee>Amazon.com)\*(?P<order_id>.*)",
       - r"(?P<payee>amzn mktp us)\*(?P<order_id>.*)",
       actions:
-
 '''
 
-Another Idea is to use custom rules:
+Rules can be added by modifying the rules.yaml file directly, or by inlining
+them/extracting them from the beancount source files.  This is through.
 
-2016-06-14 custom "matcher" "rule" '''yaml
+# Option 1
+2016-06-14 custom "matcher" "rule" '''
   match-narration: (?P<payee>AirBnB).*
   match-account: Assets:.*
   set-posting-account: Income:AirBnB
-'''
+
+## Option 2
+
+In this case the Payee and Income Account will automatically be set.
+
+2019-09-11 * "AirBnB" "Deposit - AIRBNB PAYMENTS"
+  match-key: "201909110615000000000"
+  match-narration: "(?P<payee>AirBnB).*"
+  * Assets:Banking:BofA:Checking   1039.80 USD
+  * Income:AirBnB                 -1039.80 USD
+
+Internally we process things in the following order:
+
+* Read any provide YAML File and build a list of Rules
+* Read the 'existing' beans file if provided
+* Find Any Custom Rule Directives, add those.
+* Find Any Rules hidden in Meta Data.  Add Those.
+
+With this "master" list of Rules. We "compile" them.  Rules
+are often in short-hand.  The compiled rules are instances of Rule.
 
 """
 
+import sys
 import re, yaml
 import pprint
 import logging
@@ -36,6 +57,7 @@ from typing import Dict, List, Iterator
 from beancount.core import data
 from beancount.ingest import scripts_utils
 from beancount.ingest.extract import print_extracted_entries
+from beancount.parser.printer import format_entry
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +87,8 @@ def mainX():
     for memo in some_data:
         for rex in rex_list:
             result: re.Match = re.match(rex, memo, re.IGNORECASE)
-            if result:
-                print(f"{rex} MATCH!\n{memo}\n{result.groupdict()}")
+#           if result:
+#               print(f"{rex} MATCH!\n{memo}\n{result.groupdict()}")
 
     sample_struct = [
         {
@@ -108,7 +130,7 @@ def mainX():
     ]
     dumped = yaml.dump(sample_struct)
     loaded = yaml.load(dumped, Loader=yaml.FullLoader)
-    pprint.pprint(loaded)
+    # pprint.pprint(loaded)
 
 
 class Matcher:
@@ -121,7 +143,9 @@ class Matcher:
 
     def load_yaml_file(self, file_name):
         with open(file_name, "r") as fil:
-            self.rules = yaml.load(fil)
+            rules = yaml.load(fil, Loader=yaml.FullLoader)
+            self.validate_rules(rules)
+            self.rules = rules
 
     def set_rules(self, rules, validate=True):
         if validate:
@@ -204,30 +228,58 @@ class Matcher:
         raise ValueError(f"Unknown attribute {attribute}")
 
     def match_rule(self, entry: data.Transaction, rule):
-        """Check if the Entry Matches this Rule"""
+        """Match a Single Rule to a Transaction.
+
+        Returns either None or an object describing the Match.
+        """
+        logger.debug(f"""Matching: {format_entry(entry)}""")
+
         # Only support Transactions atm
         if not isinstance(entry, data.Transaction):
             return False
 
-        matches = {}
+
+        matches = {'parameters': {}}
         for param, expressions in self.expand_match_fields(rule).items():
+
+            # print(f"{param}, {expressions}")
+
             # param is the Transaction Attribute we match on
             # expressions is a list of regular expressions
+            found = False
             for pattern in expressions:
 
                 entry_values = self.get_entry_values(entry, param)
-                logger.info(f"Looking at {param}: {entry_values}")
 
                 for value in entry_values:
-                    match_obj = re.match(pattern, value)
+                    match_obj = re.match(pattern, value, flags=re.IGNORECASE)
+                    if value.lower().find("amazon") >= 0:
+                        logger.info(f"Looking at {param}: {value} {pattern} {match_obj}")
+
                     if match_obj:
-                        # Capture the details of this Match
+                        # Capture the details of this Match, strip whitespace just for good measure
+                        matches['parameters'].update(dict((k, v.strip()) for k, v in match_obj.groupdict().items()))
                         matches[param] = {
                             'match-parameter': param,
                             'match-value': value,
                             'match-group': match_obj.groupdict()
                         }
+                        found = True
+                        logger.debug(f"Found! {matches}")
+
+                        if False:
+                            pprint.pprint(rule)
+                            pprint.pprint(matches)
+                            sys.exit(1)
                         break
+                if found:
+                    break
+
+            # This is completely Broken.
+            if not found:
+                logger.debug(f"Return NO MATCHES")
+                return {}
+        logger.debug(f"Returning {matches}")
         return matches
 
     def match(self, entry):
@@ -245,6 +297,13 @@ class Matcher:
 
     def find_matches(self, existing_entries:List) -> List[Dict]:
         for entry in existing_entries:
+            # Check Entry Type
+            if not isinstance(entry, data.Transaction):
+                continue
+
+            if entry.flag != '!':
+                continue
+
             found = self.match(entry)
             if found:
                 yield found
@@ -255,10 +314,12 @@ class Matcher:
             command, *params = key.split('-')
             if command != 'set':
                 continue
-            assert params[0] in ('transaction', 'posting'), params[0]
 
             entity = params[0]
-            if len(params) == 2:
+            if entity in ('payee', 'narration'):
+                yield 'set', 'transaction', entity, value
+            elif len(params) == 2:
+                assert params[0] in ('transaction', 'posting'), params[0]
                 # is like "set-posting-account"
                 field = params[1]
                 yield 'set', entity, field, value
@@ -276,7 +337,10 @@ class Matcher:
             'entry': the entry to modify.
         """
         entry = match['entry']
+
+        logger.info(pprint.pformat(match))
         for action, entry_type, field, value in self.expand_set_fields(match['rule']):
+            logger.info(f"{action} {entry_type} {field} {value}")
             assert action == 'set'
             if entry_type == 'transaction':
                 # Should Eval the
@@ -285,15 +349,27 @@ class Matcher:
                 postings = []
                 for posting in entry.postings:
                     if posting.flag == '!':
-                        posting = posting._replace(**{field:value})
+                        posting = posting._replace(**{field:value, 'flag':'M'})
+
                     postings.append(posting)
-                entry = entry._replace(postings=postings)
+                entry = entry._replace(postings=postings, flag='*')
+
+            # Process groupdict:
+            # pprint.pprint(match)
+            for field, value in match['matches']['parameters'].items():
+                if field == "payee" and not entry.payee:
+                    entry = entry._replace(payee=value.title()) # Propercase
+                if field.startswith('meta_'):
+                    meta_name = field[5:]
+                    entry.meta[meta_name] = value
+
         match['entry'] = entry
 
     def process(self, existing_entries):
         results = []
         for match in self.find_matches(existing_entries):
             entry = self.process_match(match)
+            # pprint.pprint(match)
             results.append(match)
         return results
 
@@ -317,23 +393,23 @@ def add_arguments(parser):
     )
     return parser
 
-def run():
+def main():
     parser = argparse.ArgumentParser()
     add_arguments(parser)
     args = parser.parse_args()
 
+    logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
+
     from beancount import loader
     from beancount.core import data
+
     # Load it
     entries, errors, options_map = loader.load_file(args.existing)
 
-
-    # print(f"loaded {len(entries)} entries, with {len(errors)} errors.")
     rules = []
 
     for entry in entries:
-        if isinstance(entry, data.Custom):
-            print(f"{entry}")
+#       if isinstance(entry, data.Custom):
 
         if 'match-re' in entry.meta:
             value = entry.meta['match-re']
@@ -349,17 +425,19 @@ def run():
                  'set-transaction-payee': entry.payee
                 }
             )
-    # pprint.pprint(rules)
     m = Matcher(rules)
     updated_entries = []
+
+    if args.rules:
+        m.load_yaml_file(args.rules)
+
     result = m.process(entries)
 
     for obj in result:
         updated_entries.append(obj['entry'])
 
-    import sys
     print_extracted_entries(updated_entries, sys.stdout)
 
 if __name__ == "__main__":
-    run()
+    main()
 

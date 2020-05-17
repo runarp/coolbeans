@@ -35,7 +35,7 @@ setup(
     # There are some restrictions on what makes a valid project name
     # specification here:
     # https://packaging.python.org/specifications/core-metadata/#name
-    name='cool-beans,  # Required
+    name='coolbeans',  # Required
 
     # Versions should comply with PEP 440:
     # https://www.python.org/dev/peps/pep-0440/
@@ -48,7 +48,7 @@ setup(
     # This is a one-line description or tagline of what your project does. This
     # corresponds to the "Summary" metadata field:
     # https://packaging.python.org/specifications/core-metadata/#summary
-    description='Beancount Importers and Matcher.'  # Optional
+    description='Beancount importers, matchers and mis tools.',  # Optional
 
     # This is an optional longer description of your project that represents
     # the body of text which users will see when they visit PyPI.
@@ -145,7 +145,12 @@ setup(
     #
     # For an analysis of "install_requires" vs pip's requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
-    install_requires=['peppercorn'],  # Optional
+    install_requires=[
+        'ibflex',
+        'ofxtools',
+        'beancount',
+        'pyyaml',
+    ],  # Optional
 
     # List additional groups of dependencies here (e.g. development
     # dependencies). Users will be able to install these using the "extras"
@@ -157,7 +162,7 @@ setup(
     # projects.
     extras_require={  # Optional
         'dev': ['check-manifest'],
-        'test': ['coverage'],
+        'test': ['coverage', 'nose'],
     },
 
     # If there are data files included in your packages that need to be
@@ -185,7 +190,8 @@ setup(
     # executes the function `main` from this package when invoked:
     entry_points={  # Optional
         'console_scripts': [
-            'cool-match=coolbeans.apps.match:main',
+            'cool-match=coolbeans.matcher:main',
+            'cool-organizer=coolbeans.organizer:main',
         ],
     },
 

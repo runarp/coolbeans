@@ -1,16 +1,11 @@
-from os import path
 import datetime
-from datetime import timedelta, date
+from datetime import timedelta
 import logging
 
 from ibflex import client, parser, Types, FlexQueryResponse, FlexStatement
-from ibflex.enums import CashAction
 
-from beancount.query import query
-from beancount.parser import options
 from beancount.ingest import importer, cache
-from beancount.core import data, amount
-from beancount.core.number import D
+from beancount.core import data, amount, account
 
 
 # create a logger
@@ -36,11 +31,11 @@ class Importer(importer.ImporterProtocol):
     """
 
     REQUIRED_ACCOUNTS = ('root', 'fees')
-    accounts:dict = None
+    accounts: dict = None
 
     def __init__(
             self,
-            accounts:dict,
+            accounts: dict,
             prefix_account_id=True,
             add_balance=True,
             commodity_accounts=True,
@@ -69,10 +64,10 @@ class Importer(importer.ImporterProtocol):
     def name(self):
         return "ib.Importer"
 
-    def identify(self, file:cache._FileMemo) -> bool:
+    def identify(self, file: cache._FileMemo) -> bool:
         try:
             self._parse_statement(file)
-        except:
+        except Exception:
             return False
         return True
 
@@ -86,7 +81,7 @@ class Importer(importer.ImporterProtocol):
 
     def file_name(self, file):
         statement = self._parse_statement(file)
-        # return f"ibflex_{statement.accountId}_{statement.fromDate.strftime('%Y-%m-%d')}_{statement.toDate.strftime('%Y-%m-%d')}.xml"
+
         if statement.Trades:
             return "ibflex-trades.xml"
         elif statement.OpenPositions:
@@ -125,12 +120,13 @@ class Importer(importer.ImporterProtocol):
     def account_for_symbol(self, statement, ib_symbol):
         symbol = self.clean_symbol(ib_symbol)
         root_account = self.accounts['root']
+
         if self.prefix_account_id:
-            root_account = root_account + ":" + statement.accountId
+            root_account = account.join(root_account, statement.accountId)
 
-        return root_account + ":" + symbol
+        return account.join(root_account, symbol)
 
-    def extract(self, file:cache._FileMemo, existing_entries=None):
+    def extract(self, file: cache._FileMemo, existing_entries=None):
         """
         ibflex allows for several "sections", each one has some good tidbits. We support reports with some or all
         of he sections.  These are mostly handled in "extract_[name]" methods.  Here we call each, and it returns
@@ -142,17 +138,19 @@ class Importer(importer.ImporterProtocol):
         commodities = self.extract_commodities(statement, existing_entries)
         prices = self.extract_prices(statement, existing_entries)
         trades = self.extract_trades(statement, existing_entries)
+        opens = self.extract_new_accounts(statement, existing_entries)
 
-        return commodities + prices + trades
+        return commodities + prices + trades + opens
 
     def extract_cash_transaction(self, statement: FlexStatement, existing_entries:list=None):
         """
-        for item in statement.CashTransactions: print(f"{item.dateTime} {item.type.name}: {item.currency} {item.amount}: {item.description}");
+        for item in statement.CashTransactions: print(f"{item.dateTime} {item.type.name}: {item.currency} {item.amount}:
+        {item.description}");
 
         https://www.interactivebrokers.com/en/software/reportguide/reportguide/cash_transactionsfq.htm
 
         Some fun things to import:
-        2020-04-03 00:00:00 DEPOSITWITHDRAW: USD 1500000: CASH RECEIPTS / ELECTRONIC FUND TRANSFERS
+        2020-04-03 00:00:00 DEPOSITWITHDRAW: USD 15000: CASH RECEIPTS / ELECTRONIC FUND TRANSFERS
         2020-01-06 00:00:00 BROKERINTPAID: JPY -295: JPY DEBIT INT FOR DEC-2019
         2020-05-05 17:40:38 FEES: USD 10: P*****07:SNAPSHOTVALUENONPRO FOR APR 2020
         2020-04-01 20:20:00 WHTAX: USD -142.2: SDS(US74347B3832) PAYMENT IN LIEU OF DIVIDEND - US TAX
@@ -189,7 +187,7 @@ class Importer(importer.ImporterProtocol):
         """
         fees_account = self.accounts['fees']
 
-        match_key = 'execution-id'
+        match_key = 'match-key'
 
         existing_by_key = self.find_existing(existing_entries, match_key)
 
@@ -221,7 +219,9 @@ class Importer(importer.ImporterProtocol):
             else:
                 safe_symbol = self.clean_symbol(trade.symbol)
 
-            narration = f"{trade.buySell.name} {trade.quantity} {safe_symbol} @ {trade.tradePrice} {trade.currency} on {trade.exchange}"
+            narration = (f"{trade.buySell.name} {trade.quantity} {safe_symbol} @ "
+                         f"{trade.tradePrice} {trade.currency} on {trade.exchange}")
+
             tags = data.EMPTY_SET
 
             # cost = data.Amount(trade.cost, trade.currency)
@@ -252,7 +252,7 @@ class Importer(importer.ImporterProtocol):
                         units=unit_amount,
                         cost=None, #cost_amount, # cost=(Cost, CostSpec, None),
                         price=post_price,
-                        flag=None,
+                        flag=self.FLAG,
                         meta={}
                     ),
                     # How does this affect our Cash?
@@ -261,7 +261,7 @@ class Importer(importer.ImporterProtocol):
                         units=cash_amount,
                         cost=None,  # cost=(Cost, CostSpec, None),
                         price=None,
-                        flag=None,
+                        flag=self.FLAG,
                         meta={}
                     ),
 
@@ -271,7 +271,7 @@ class Importer(importer.ImporterProtocol):
                         units=amount.Amount(trade.ibCommission, trade.ibCommissionCurrency),
                         cost=None,
                         price=None,
-                        flag=None,
+                        flag=self.FLAG,
                         meta={}
                     ),
                    data.Posting(
@@ -279,7 +279,7 @@ class Importer(importer.ImporterProtocol):
                        units=amount.Amount(-trade.ibCommission, trade.ibCommissionCurrency),
                        cost=None,
                        price=None,
-                       flag=None,
+                       flag=self.FLAG,
                        meta={}
                    )
                 ]
@@ -326,6 +326,49 @@ class Importer(importer.ImporterProtocol):
                 )
             )
         return result
+
+    def extract_new_accounts(self, statement: FlexStatement, existing_entries:list=None):
+
+        existing = {}
+        root_account = self.accounts['root']
+
+        existing_accounts = set()
+        if existing_entries:
+            for entry in existing_entries:
+                if isinstance(entry, data.Open):
+                    existing_accounts.add(entry.account)
+
+        results = []
+        for obj in statement.SecuritiesInfo:
+
+            symbol = self.clean_symbol(obj.symbol)
+            account_name = self.account_for_symbol(statement, symbol)
+
+            if account_name in existing_accounts:
+                continue
+
+            meta = {
+                'lineno': 0,
+                'filename': '',
+                'description': obj.description,
+                'multiplier': obj.multiplier,
+                'conid': obj.conid,
+                'asset-type': obj.assetCategory.name.lower(),
+            }
+            if obj.cusip:
+                meta['cusip'] = obj.cusip
+            if obj.securityID:
+                meta['security-id'] = obj.securityID
+
+            entry = data.Open(
+                date=datetime.date(2010, 1, 1),
+                account=account_name,
+                currencies=[symbol],
+                meta=meta,
+                booking=None,
+            )
+            results.append(entry)
+        return results
 
     def extract_commodities(self, statement: FlexStatement, existing_entries:list=None):
         """

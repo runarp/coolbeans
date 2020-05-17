@@ -1,0 +1,5 @@
+-e .
+beancount
+ibflex
+ofxtools
+pyyaml
