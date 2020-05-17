@@ -4,6 +4,19 @@ A collection of utilities and importers I use for my beancount workflow.
 
 I'll try to keep this project "generic" and "configurable" so, perhaps, someone else could use it.
 
+
+## Usage
+
+There are two command-line utilties so far.  cool-organizer and cool-match
+
+cool-organizer will modify a file in-place, filing new entries:
+
+  cool-organizer -e root.bean -m 2020.bean new_entries.bean -y 2020
+
+Would read the root.bean and file entries from new_entires.bean into the 2020.bean.  the -y filter enforces the filing to ignore any other years from the new_entries.
+
+
+
 # ideas
 
 ## Dynamic import.py
