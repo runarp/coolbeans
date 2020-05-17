@@ -43,14 +43,24 @@ class Importer(importer.ImporterProtocol):
     ):
         """
 
-        :param accounts:
-        :param prefix_account_id: set to true such that We insert the Account_ID after the root account:
+        :param accounts: Dict of accounts used by the importer, for example:
+            {
+                'root': "Assets:Investment:IB",
+                'fees': "Expenses:IB:Fees"
+            }
+        :param prefix_account_id: set to True such that We insert the
+            Account_ID after the root account:
+
             Assets:Investment:IB:[Account-id]:[Commodity]
+
         :param add_balance: When True we try to include 'balance' statements from positions
+            NOT IMPLEMETED YET--always True
+
         :param ib_account_id: Optional the ib_account_id to use incase there are multiple accounts in the
             statement.  By default we parse only the first statement.
 
-        Possible TODO to parse all accounts.
+        Possible TODO to parse all accounts?
+
         """
 
         self.accounts = accounts
