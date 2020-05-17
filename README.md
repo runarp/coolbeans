@@ -50,22 +50,13 @@ Vanial ofx importer that:
 ### Dynamic import.py
 Make CONFIG an iterable that introspects existing file (or loaded file?).
 
-Each account could have it's own import meta-data.  The Pros are:
+Each account could have its own import meta-data.  The Pros are:
 
 * We don't "loose" accounts
 * Less work keeping Multiple account files in sync with importers
 * problem: If the importer changes over time?
     * this might not be an issue after the initial loading.
 
-### Roundtrip Some of the files
-
-Create a "Sorter" based on:
-
-    YYYY, Account, MM, DD, meta['sort']
-
-* each year could be it's own bean file (or folder?)
-* At the start of the year a simple pad/balance can give a sane starting point
-* intra-Year accounts can be opened/closed, but generally are manged in the root file.
 
 ### Duplicate Entry problem
 
@@ -101,3 +92,13 @@ Section headers can be auto-generated:
 
 Because we are forcing accounts, we have to white-list the Accounts that go
 into the annual file?  (I want to exclude trading accounts)
+
+### Roundtrip Some of the files
+
+Create a "Sorter" based on:
+
+    YYYY, Account, MM, DD, meta['sort']
+
+* each year could be it's own bean file (or folder?)
+* At the start of the year a simple pad/balance can give a sane starting point
+* intra-Year accounts can be opened/closed, but generally are manged in the root file.

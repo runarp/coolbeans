@@ -1,13 +1,15 @@
 """
 A single Match Rule.
 
-Rules are helpful basic Units of transformatin to a
+Rules are helpful basic Units of Transformations on a
 beancount entry.
+
 """
 import yaml
 import re
 
-MATCH_RE = list(map(re.compile, [
+# We use MATCH_KEY_RE to capture the valid keys in our Rules Dict
+MATCH_KEY_RE = list(map(re.compile, [
     r"match",
     r"^match-(?P<field>\w+)$",
     r"^match-((?P<entity_type>tx|transaction|posting|pst)-)?(?P<field>\w+)$",
@@ -37,7 +39,7 @@ class Rule:
 
     def add_match_directive(self, key, value):
 
-        key_parts = match_any_re(MATCH_RE, key)
+        key_parts = match_any_re(MATCH_KEY_RE, key)
         assert isinstance(key_parts, dict)
 
         if isinstance(value, str):
