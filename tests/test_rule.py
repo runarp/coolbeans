@@ -1,7 +1,8 @@
 import re
+import yaml
 import unittest
 
-from coolbeans.rule import MATCH_KEY_RE
+from coolbeans.rule import MATCH_KEY_RE, Rule
 
 
 class TestMatches(unittest.TestCase):
@@ -57,3 +58,19 @@ class TestMatches(unittest.TestCase):
 
     def test_require_full2(self):
         self.match_any(MATCH_KEY_RE, "match__", None)
+
+    def test_compile_basic(self):
+        """Expand a Rule into actionable steps"""
+
+        rule = yaml.load("""
+        match:
+            narration: AirBnB(.*)
+        """)
+
+        r = Rule()
+        r.compile(rule)
+
+        self.assertEqual(
+            {('transaction', 'narration', None): ["AirBnB(.*)"]},
+            r.match_requirements
+        )

@@ -7,6 +7,7 @@ beancount entry.
 """
 import yaml
 import re
+import pprint
 
 # We use MATCH_KEY_RE to capture the valid keys in our Rules Dict
 MATCH_KEY_RE = list(map(re.compile, [
@@ -22,25 +23,63 @@ def match_any_re(regex_list, value):
     for regex in regex_list:
         match = regex.fullmatch(value)
         if match:
-            return regex.groupdict()
+            return match.groupdict()
 
 class Rule:
+    """
+    a Rule object captures a list of match criteria as well as a list
+    of "actions".  These can be serialized in a dictionary and applied
+    to entries.
+    """
 
+    # Dict (entity_type, key, meta-key) -> [values]
     match_requirements: dict = None
+
     actions: list = None
     assertions: list = None
     tests: list = None
 
     def __init__(self):
+        # These are the Match rules
         self.match_requirements = {}
+
+        # This is what to do if we match
         self.actions = []
+
+        # Ideas for sanity checks
         self.assertions = []
         self.tests = []
 
-    def add_match_directive(self, key, value):
+    def parse_expanded_match_key(self, key, value):
+        """
+        expects a key in the format:
+        match-[entity]-[field][-[optional meta key]], value
+        """
 
+    def add_match_field_directive(self, field_name, value):
+        assert field_name in ('account', 'narration', 'meta', 'payee')
+        self.match_requirements[('transaction', field_name, None)] = [value]
+
+    def add_match_directive(self, key, value):
+        """
+        Match directives can be explicit or nested dictionaries.
+
+        - match:
+            narration: AirBnB(.*)
+        # and
+        - match-narration: AirBnB(.*)
+
+        are the same thing.  So we do some work to decode this.
+
+        """
         key_parts = match_any_re(MATCH_KEY_RE, key)
-        assert isinstance(key_parts, dict)
+        assert isinstance(key_parts, dict), f"Unable to parse {key} as a match directive."
+
+        if isinstance(value, dict):
+            assert key == 'match', "Only expect a dict under a 'match' directive"
+            for field_name, v in value.items():
+                # Process all of these match directives
+                self.add_match_field_directive(field_name, v)
 
         if isinstance(value, str):
             # Rule should be in format match-[type]-[field]
@@ -60,11 +99,12 @@ class Rule:
             self.match_requirements[(entity_type, field, meta_name)] = [value]
             return
 
+
     def add_action_directive(self, key, value):
-        pass
+        self.actions = value
 
     def add_tests_directive(self, key, value):
-        pass
+        self.tests = value
 
     def decode_value(self, value):
         if isinstance(value, str):
@@ -78,26 +118,28 @@ class Rule:
         """Given a dict, compile it into a list of
         match_requirements, actions, asserts and tests.
         """
+        pprint.pprint(rule)
 
         valid_commands = ['match', 'set', 'test']
         valid_fields = ['account', 'payee', 'date', 'tags', 'narration', 'posting', 'transaction']
 
         for key, value in rule.items():
 
+            # Is this needed yet?
+            command, *fields = key.split('-')
+            assert command in valid_commands, f"{command} not found in {valid_commands}"
+
             # We allow for embedded YAML, handle that case
             value = self.decode_value(value)
             key = key.lower().strip()
 
+            # Each directive type has its own processor
             if key.startswith('match'):
                 self.add_match_directive(key, value)
             if key.startswith('set'):
                 self.add_action_directive(key, value)
             if key == 'tests':
                 self.add_tests_directive(key, value)
-
-
-            command, *fields = key.split('-')
-            assert command in valid_commands, f"{command} not found in {valid_commands}"
 
             for field in fields:
                 assert field in valid_fields, (field, valid_fields)
