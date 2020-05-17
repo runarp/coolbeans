@@ -7,7 +7,7 @@ import yaml
 from coolbeans.matcher import Matcher
 from beancount.core.data import Transaction, Posting, Amount, D
 
-AMAZON_RULE:dict = None
+AMAZON_RULE: dict = None
 
 class TestMatcher(unittest.TestCase):
     def xsetUp(self):
@@ -120,7 +120,7 @@ class TestMatcher(unittest.TestCase):
                     meta={}
                 )
             ],
-            meta={'file_name':'', 'lineno':0}
+            meta={'file_name':'', 'lineno': 0}
         )
         m = Matcher([AMAZON_RULE])
 
@@ -136,19 +136,23 @@ AMAZON_RULE = {
         r"(?P<payee>Amazon.com)\*(?P<order_id>.*)",
         r"(?P<payee>amzn mktp us)\*(?P<order_id>.*)",
     ],
-    # Optional, Match Any
+    # AND Match Any
     'match-account': [
         r"Liabilities:.*"
     ],
+    # AND Match Any
     'match': {'tags': 'household'},
+    # DO on the Transaction object
     'set-transaction': {
         "payee": "Amazon",
         "tags": "kids",
         "meta": {"order-id": "{order_id}"}
     },
+    # Do on the implied Posting:
     'set-posting': {
         "account": "Expenses:Shopping",
     },
+    # Make sure we have Sane Regex:
     'test': {
         "Amazon.com*MO7IO3OL2": {
             'order_id': 'MO7IO3OL2'
