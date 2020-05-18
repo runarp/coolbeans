@@ -134,9 +134,10 @@ def mainX():
 
 
 class Matcher:
-    rules: dict = None
+    rules: list = None
 
     def __init__(self, rules=None):
+        self.rules = []
 
         if rules:
             self.set_rules(rules)
@@ -145,7 +146,7 @@ class Matcher:
         with open(file_name, "r") as fil:
             rules = yaml.load(fil, Loader=yaml.FullLoader)
             self.validate_rules(rules)
-            self.rules = rules
+            self.rules.extend(rules)
 
     def set_rules(self, rules, validate=True):
         if validate:
