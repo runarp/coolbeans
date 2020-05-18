@@ -52,12 +52,17 @@ import re, yaml
 import pprint
 import logging
 import argparse
-from typing import Dict, List, Iterator
+from dataclasses import dataclass
+from typing import Dict, List, Iterator, Union, Optional
 
 from beancount.core import data
+from beancount.core.data import Directive, Entries
 from beancount.ingest import scripts_utils
 from beancount.ingest.extract import print_extracted_entries
 from beancount.parser.printer import format_entry
+
+from coolbeans.rule import Rule
+
 
 logger = logging.getLogger(__name__)
 
@@ -132,15 +137,21 @@ def mainX():
     loaded = yaml.load(dumped, Loader=yaml.FullLoader)
     # pprint.pprint(loaded)
 
+@dataclass
+class Match:
+    entry: Directive
+    rule: Rule
+    data: Dict[str, str]
+
 
 class Matcher:
-    rules: list = None
+    rules: List[Rule] = None
 
     def __init__(self, rules=None):
         self.rules = []
 
         if rules:
-            self.set_rules(rules)
+            self.add_rules(rules)
 
     def load_yaml_file(self, file_name):
         with open(file_name, "r") as fil:
@@ -148,70 +159,9 @@ class Matcher:
             self.validate_rules(rules)
             self.rules.extend(rules)
 
-    def set_rules(self, rules, validate=True):
-        if validate:
-            self.validate_rules(rules)
-        self.rules = rules
-
-    def validate_rules(self, rules):
-        """
-        Quickly process and verify the rules
-        :return:
-        """
-        for rule in rules:
-            self.validate(rule)
-
-    def validate(self, rule):
-        valid_commands = ['match', 'set', 'test']
-        valid_fields = ['account', 'payee', 'date', 'tags', 'narration', 'posting', 'transaction']
-
-        for key, value in rule.items():
-            command, *fields = key.split('-')
-            assert command in valid_commands, f"{command} not found in {valid_commands}"
-
-            for field in fields:
-                assert field in valid_fields, (field, valid_fields)
-
-        # Check all match Fields
-        for field, values in self.expand_match_fields(rule).items():
-            for expression in values:
-                re.compile(expression)
-
-    def expand_match_fields(self, rule) -> Dict[str, List[str]]:
-        """
-        Expanded, rules are in the format:
-            'match' : {'field': ["regex1", "regex2"]}
-
-        But this can be shortened to:
-            {'match-field': 'regex1'}
-        or
-            {'match-field': ['regex1', 'regex2']}
-
-        for example:
-            {'match-narration': 'Amazon.*'}
-
-        always returns the expanded rules:
-            {'field': ['regex1', 'regex2'], ...}
-
-        """
-        # We use any 'match' dictionary as the starting point
-        result = rule.get('match', {})
-
-        for key, values in rule.items():
-            if '-' not in key:
-                continue
-            command, *field = key.split('-')
-            # Only handling Match Command
-            if not command == "match":
-                continue
-            result[field[0]] = values
-
-        # Wrap any strings a list:
-        for key, values in result.items():
-            if isinstance(values, str):
-                result[key] = [values]
-
-        return result
+    def add_rules(self, rules: List[Rule]):
+        for rule_dict in rules:
+            self.rules.append(Rule(rule_dict))
 
     def get_entry_values(self, entry, attribute) -> List[str]:
         """Give an beancount entry, fish for this attribute.  Return a list
@@ -283,20 +233,20 @@ class Matcher:
         logger.debug(f"Returning {matches}")
         return matches
 
-    def match(self, entry):
+    def match(self, entry: Directive) -> Optional[Match]:
         """Accepts a BeanCount Entry and tries to find a Matching Rule."""
         for rule in self.rules:
-            match_obj = self.match_rule(entry, rule)
-            if match_obj:
-                return {
-                    'rule': rule,
-                    'matches': match_obj,
-                    'entry': entry
-                }
+            match = rule.check(entry)
+            if match is not None:
+                return Match(
+                    entry=entry,
+                    rule=rule,
+                    data=match
+                )
         else:
             return
 
-    def find_matches(self, existing_entries:List) -> List[Dict]:
+    def find_matches(self, existing_entries:Entries) -> Iterator[Match]:
         for entry in existing_entries:
             # Check Entry Type
             if not isinstance(entry, data.Transaction):
@@ -331,16 +281,18 @@ class Matcher:
 
         return result
 
-    def process_match(self, match:dict):
-        """Accepts a match dict in format
+    def process_match(self, match: Match):
+        """Accepts a Match object
+
             'rule': The Original Rule,
             'matches': the values that matched
             'entry': the entry to modify.
         """
-        entry = match['entry']
 
+        entry = match.entry
         logger.info(pprint.pformat(match))
-        for action, entry_type, field, value in self.expand_set_fields(match['rule']):
+
+        for action, entry_type, field, value in self.expand_set_fields(match.rule):
             logger.info(f"{action} {entry_type} {field} {value}")
             assert action == 'set'
             if entry_type == 'transaction':
@@ -370,6 +322,7 @@ class Matcher:
         results = []
         for match in self.find_matches(existing_entries):
             entry = self.process_match(match)
+
             # pprint.pprint(match)
             results.append(match)
         return results
@@ -407,7 +360,7 @@ def main():
     # Load it
     entries, errors, options_map = loader.load_file(args.existing)
 
-    rules = []
+    rules:List[Rule] = []
 
     for entry in entries:
 #       if isinstance(entry, data.Custom):
