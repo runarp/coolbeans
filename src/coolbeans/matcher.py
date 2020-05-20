@@ -67,6 +67,58 @@ from coolbeans.rule import Rule
 logger = logging.getLogger(__name__)
 
 
+__plugins__ = ('match_directives',)
+
+
+def match_directives(entries, options_map):
+    """Modify any entries that Match existing Rules"""
+    rules = []
+    # First Pass, Build a list of Match Rules
+    for entry in entries:
+        logger.debug(f"{type(entry)}: {repr(entry)}")
+        for key, value in entry.meta.items():
+            if key.startswith('match'):
+                rule = rule_from_meta(entry)
+                rules.append(rule)
+                break
+
+    new_entries = []
+    for entry in entries:
+        # We're only interested in Pending Entries
+        if entry.flag != '!':
+            new_entries.append(entry)
+            continue
+
+        # Test against all of our Rules:
+        for rule in rules:
+            match_values = rule.check(entry)
+            if match_values is None:
+                continue
+            entry = rule.modify_entry(entry, match_values)
+        new_entries.append(entry)
+
+
+    return entries, []
+
+
+def rule_from_meta(entry: data.Transaction) -> Rule:
+    """We use the Entry as a template to the Rule
+    Copy the Narration, Payee, Tags, Expense Account etc.
+    """
+    rs = {}
+    if entry.tags: rs['set-tags'] = entry.tags
+    if entry.payee: rs['set-payee'] = entry.payee
+    for posting in entry.postings:
+        if posting.meta.get('match-lock'):
+            rs['set-posting-account'] = posting.account
+
+    for k, v in entry.meta.items():
+        if k.startswith('match-') or k.startswith('set-'):
+            rs[k] = v
+
+    return Rule(rs)
+
+
 def mainX():
     some_data = [
         "Amazon.com*MO7IO3OL2",
@@ -218,10 +270,6 @@ class Matcher:
                         found = True
                         logger.debug(f"Found! {matches}")
 
-                        if False:
-                            pprint.pprint(rule)
-                            pprint.pprint(matches)
-                            sys.exit(1)
                         break
                 if found:
                     break
@@ -290,7 +338,6 @@ class Matcher:
         """
 
         entry = match.entry
-        logger.info(pprint.pformat(match))
 
         for action, entry_type, field, value in self.expand_set_fields(match.rule):
             logger.info(f"{action} {entry_type} {field} {value}")

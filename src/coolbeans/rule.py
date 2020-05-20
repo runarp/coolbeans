@@ -31,39 +31,46 @@ from __future__ import annotations
 import yaml
 import re
 import pprint
+import logging
 from dataclasses import dataclass, asdict, field
 from typing import List, Optional, Set, Dict, Union
 
 from beancount.core import data
+from beancount.parser import printer
 
+logger = logging.getLogger(__name__)
 
 # We use MATCH_KEY_RE to capture the valid keys in our Rules Dict
 MATCH_KEY_RE = list(map(re.compile, [
     r"match",
-    r"^match-(?P<field>\w+)$",
-    r"^match-((?P<directive>tx|transaction|posting|pst)-)?(?P<field>\w+)$",
-    r"^match-((?P<directive>tx|transaction|posting|pst)-)?(?P<field>meta)-(?P<meta>.*)$",
+    r"^match-(?P<parameter>\w+)$",
+    r"^match-((?P<directive>tx|transaction|posting|pst)-)?(?P<parameter>\w+)$",
+    r"^match-((?P<directive>tx|transaction|posting|pst)-)?(?P<parameter>meta)-(?P<meta>.*)$",
 ]))
 
 # We use MATCH_KEY_RE to capture the valid keys in our Rules Dict
 MATCH_SUB_KEY_RE = list(map(re.compile, [
-    r"^(?P<field>\w+)$",
-    r"^((?P<directive>tx|transaction|posting|pst)-)?(?P<field>\w+)$",
-    r"^((?P<directive>tx|transaction|posting|pst)-)?(?P<field>meta)-(?P<meta>.*)$",
+    r"^(?P<parameter>\w+)$",
+    r"^((?P<directive>tx|transaction|posting|pst)-)?(?P<parameter>\w+)$",
+    r"^((?P<directive>tx|transaction|posting|pst)-)?(?P<parameter>meta)-(?P<meta>.*)$",
 ]))
 
 KEY_RE = list(map(re.compile, [
     r"^(?P<command>set|match|test)$",
-    r"^(?P<command>set|match|test)-(?P<field>\w+)$",
+    r"^(?P<command>set|match|test)-(?P<parameter>\w+)$",
     r"^(?P<command>set|match|test)-((?P<directive>tx|transaction|posting|pst)-)?(?P<parameter>\w+)$",
     r"^(?P<command>set|match|test)-((?P<directive>tx|transaction|posting|pst)-)?(?P<parameter>meta)-(?P<meta_key>.*)$",
 ]))
 
 SUB_KEY_RE = list(map(re.compile, [
-    r"^(?P<field>\w+)$",
+    r"^(?P<parameter>\w+)$",
     r"^((?P<directive>tx|transaction|posting|pst)-)?(?P<parameter>\w+)$",
     r"^((?P<directive>tx|transaction|posting|pst)-)?(?P<parameter>meta)-(?P<meta_key>.*)$",
 ]))
+
+
+TRANSACTION_PARAMETERS = ('narration', 'tags', 'payee', 'narration', 'links', 'flag')
+
 
 def match_any_re(regex_list, value):
     """Given a list of pre-compiled regular expressions,
@@ -73,20 +80,27 @@ def match_any_re(regex_list, value):
         if match:
             return match.groupdict()
 
+
 @dataclass
 class DirectiveAttribute:
     """A Single Attribute on a Directive"""
-    command: Optional[str]
     directive: str
     parameter: str
     meta_key: Optional[str]
+    command: Optional[str] = field(default=None)
+
+    def validate(self):
+        assert self.command in ("set", "match", "test")
+        assert self.directive in ("transaction", "posting")
+
 
 @dataclass
 class SetRule(DirectiveAttribute):
     """A single transformation on a Directive
 
     """
-    value: str
+    value: str = field(default="")
+
 
 @dataclass
 class MatchRule(DirectiveAttribute):
@@ -94,7 +108,7 @@ class MatchRule(DirectiveAttribute):
     extract the value on an beancount Entry.
 
     """
-    regular_expressions: Set[re.Pattern]
+    regular_expressions: Set[re.Pattern] = field(default_factory=set)
 
     def __eq__(self, other: MatchRule):
         """Compare, including Regex"""
@@ -212,16 +226,16 @@ class Rule:
                 key_parts = match_any_re(MATCH_SUB_KEY_RE, field_name)
 
                 # Duplicated from below, need to clean up
-                entity_type = key_parts.get('directive', None)
-                field = key_parts.get('field', None)
+                directive = key_parts.get('directive', None)
+                field = key_parts.get('parameter', None)
                 meta_name = key_parts.get('meta', None)
-                print(f"directive={entity_type}, field={field}, meta_name={meta_name}")
+                print(f"directive={directive}, parameter={field}, meta_name={meta_name}")
                 if field in ('narration', 'tags', 'payee'):
-                    assert entity_type is None or entity_type == 'transaction'
-                    entity_type = 'transaction'
+                    assert directive is None or directive == 'transaction'
+                    directive = 'transaction'
                 elif field in ('account',):
-                    assert entity_type is None or entity_type == 'posting'
-                    entity_type = 'posting'
+                    assert directive is None or directive == 'posting'
+                    directive = 'posting'
                 elif field in ('meta',):
                     assert meta_name, "Meta requires an addition name, like 'match-meta-mykey"
 
@@ -232,26 +246,25 @@ class Rule:
                 values = {re.compile(v) for v in values}
 
                 match_rule = MatchRule(
-                    entity_type=entity_type,
+                    directive=directive,
                     parameter=field,
                     meta_key=meta_name,
                     regular_expressions=values
                 )
-                print(f"**** Upsert {match_rule}")
                 self.upset_match_rule(match_rule)
 
         if isinstance(value, (str, list)):
             # Rule should be in format match-[type]-[field]
-            entity_type = key_parts.get('directive', None)
-            field = key_parts.get('field', None)
+            directive = key_parts.get('directive', None)
+            field = key_parts.get('parameter', None)
             meta_name = key_parts.get('meta', None)
 
             if field in ('narration', 'tags', 'payee'):
-                assert entity_type is None or entity_type == 'transaction'
-                entity_type = 'transaction'
+                assert directive is None or directive == 'transaction'
+                directive = 'transaction'
             elif field in ('account',):
-                assert entity_type is None or entity_type == 'posting'
-                entity_type = 'posting'
+                assert directive is None or directive == 'posting'
+                directive = 'posting'
             elif field in ('meta',):
                 assert meta_name, "Meta requires an addition name, like 'match-meta-mykey"
 
@@ -262,52 +275,76 @@ class Rule:
             values = {re.compile(v) for v in values}
 
             match_rule = MatchRule(
-                entity_type=entity_type,
+                directive=directive,
                 parameter=field,
                 meta_key=meta_name,
                 regular_expressions=values
             )
             self.upset_match_rule(match_rule)
 
+    def default_key_match(self, key_match):
+        parameter = key_match.get('parameter', None)
+        if parameter in ('narration', 'payee', 'tags', 'meta'):
+            key_match.setdefault('directive', 'transaction')
+        if parameter in ('account',):
+            key_match.setdefault('directive', 'posting')
+
     def expand_rule_dict(self, rule_dict: Dict[str, Union[str, List[str], dict]]) -> DirectiveAttribute:
+        logger.debug(f"checking on rule_dict: {pprint.pprint(rule_dict)}")
         for key, value in rule_dict.items():
-            key_match = re.match(KEY_RE, key)
-            if not key_match:
+            key_match = match_any_re(KEY_RE, key)
+            logger.debug(f"match: {key_match}")
+
+            if key_match is None:
                 raise ValueError(f"Invalid Key format {key} in {rule_dict}")
 
-            response = key_match.groupdict()
+            response = key_match
+            self.default_key_match(key_match)
+            logger.debug(f"defaulted-match: {key_match}")
+
             command = response.pop('command', None)
+            directive = 'set'
+            parameter = response.pop('parameter', None)
 
-            attr = DirectiveAttribute(**response)
+            attr = DirectiveAttribute(
+                command=command,
+                directive=directive,
+                parameter=parameter,
+                meta_key=response.get('meta_key', None),
+            )
+            logger.debug(f"Directive attr= {attr}")
 
+            if command == 'test':
+                return None
+
+            # Is this code even related
             if isinstance(value, dict):
                 for k, v in value.items():
-                    key_match = re.match(SUB_KEY_RE, k)
-                    if not key_match:
-                        raise ValueError(f"Invalid Key format {key} in {rule_dict}")
-                    r = key_match.groupdict()
-                    attr = 1
-                    r.update(response)
-                    r['value'] = v
-                    yield r
+                    key_match = match_any_re(SUB_KEY_RE, k)
+                    if key_match is None:
+                        raise ValueError(f"{type(value)} Invalid Key format {key} in {rule_dict}")
+                    self.default_key_match(key_match)
+                    r = key_match
+                    attr.directive = r.get('directive', attr.directive)
+                    attr.parameter = r.get('parameter', attr.parameter)
+                    attr.meta_key = r.get('meta_key', attr.meta_key)
+                    attr.value = v
+                    yield attr
             else:
-                response['value'] = value
-                yield value
+                attr.value = value
+                yield attr
 
     def setdefault_params(self, attr: DirectiveAttribute) -> DirectiveAttribute:
-        # assert params.command in ('set', 'match', 'test')
+        """Given a DirectiveAttribute, set the default paths for known attributes."""
 
-       #entity_type = params.get('directive', None)
-       #field = params.get('field', None)
-       #meta_name = params.get('meta', None)
         if attr.directive in ('tx', 'trans'):
             attr.directive = 'transaction'
 
-        if attr.parameter in ('narration', 'tags', 'payee'):
-            assert attr.directive is None or attr.directive == 'transaction'
+        if attr.parameter in TRANSACTION_PARAMETERS:
+            assert attr.directive is None or attr.directive == 'transaction', (attr, transaction_parameters)
             attr.directive = 'transaction'
         elif attr.parameter in ('account',):
-            assert attr.directive is None attr.directive == 'posting'
+            assert attr.directive is None or attr.directive == 'posting'
             attr.directive = 'posting'
         elif attr.parameter in ('meta',):
             assert attr.meta_key, "Meta requires an addition name, like 'match-meta-mykey"
@@ -315,16 +352,18 @@ class Rule:
         return attr
 
     def add_directives(self, rule_dict):
-        for params in self.expand_rule_dict(rule_dict):
-            self.setdefault_params(params)
+        for da in self.expand_rule_dict(rule_dict):
+            logger.debug(f"{rule_dict} -> {da}")
+            assert da.command in ('set', 'match', 'test'), da
+            self.setdefault_params(da)
 
-            if params['command'] == 'set':
+            if da.command == 'set':
                 self.set_rules.append(
                     SetRule(
-                        parameter=params['field'],
-                        entity_type=params['directive'],
-                        meta_key=params['meta'],
-                        value=params['value']
+                        parameter=da.parameter,
+                        directive=da.directive,
+                        meta_key=da.meta_key,
+                        value=da.value,
                     )
                 )
 
@@ -358,6 +397,9 @@ class Rule:
             'meta'
         ]
         for key, value in rule.items():
+            # Should rename match-key
+            if key == 'match-key':
+                continue
 
             # Is this needed yet?
             command, *fields = key.split('-')
@@ -371,21 +413,62 @@ class Rule:
             if key.startswith('match'):
                 print(f"Adding {key} {value}")
                 self.add_match_directive(key, value)
-            if key.startswith('set'):
-                self.add_action_directive(key, value)
             if key == 'tests':
                 self.add_tests_directive(key, value)
 
             for field in fields:
                 assert field in valid_fields, (field, valid_fields)
 
+        self.add_directives(rule)
+
     def check(self, entry):
         result_dict = {}
-        for match_requirement in self.match_requirements:
+        for key, match_requirement in self.match_requirements.items():
             match = match_requirement.match_entry(entry)
             if match is None:
                 return None
             result_dict.update(match)
         return result_dict
 
+    def modify_entry(self, entry: data.Transaction, match_values: dict):
+        """takes an Entry and a dict of values we parsed from the Entry
+        """
 
+        # Pre-process match_value?
+
+        pprint.pprint(self.set_rules)
+        for sr in self.set_rules:
+            logger.info(f"{sr}")
+
+            if sr.directive == 'transaction':
+                # Should Possible Eval the Value?
+                if sr.meta_key:
+                    # Meta Key is inserted
+                    meta = dict(entry.meta)
+                    meta[sr.meta_key] = sr.value
+                    entry = entry._replace(meta=meta)
+                else:
+                    # Meta
+                    entry = entry._replace(**{sr.parameter: sr.value})
+
+            elif sr.directive == 'posting':
+                postings = []
+                for posting in entry.postings:
+                    if posting.flag == '!':
+                        posting = posting._replace(**{
+                            sr.parameter: sr.value,
+                            'flag': '*'
+                        })
+                    postings.append(posting)
+
+                entry = entry._replace(postings=postings, flag='*')
+
+            for field, value in match_values.items():
+                # We allow <payee> and <meta_tagname> in match-groups
+                if field == "payee" and not entry.payee:
+                    entry = entry._replace(payee=value.title())  # Propercase
+                if field.startswith('meta_'):
+                    meta_name = field[5:]
+                    entry.meta[meta_name] = value
+
+        return entry

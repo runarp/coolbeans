@@ -2,8 +2,15 @@ import re
 import yaml
 import unittest
 import pprint
+import logging
+
+from beancount.parser import parser
 
 from coolbeans.rule import MATCH_KEY_RE, Rule, MatchRule
+from coolbeans import matcher
+
+
+logger = logging.getLogger(__name__)
 
 
 class TestMatches(unittest.TestCase):
@@ -28,32 +35,32 @@ class TestMatches(unittest.TestCase):
         self.match_any(MATCH_KEY_RE, "match", {})
 
     def test_match_re_3(self):
-        self.match_any(MATCH_KEY_RE, "match-narration", {'field': 'narration'})
+        self.match_any(MATCH_KEY_RE, "match-narration", {'parameter': 'narration'})
 
     def test_match_re_2(self):
         self.match_any(
             MATCH_KEY_RE,
             "match-transaction-narration",
-            {'field': 'narration', 'directive': 'transaction'}
+            {'parameter': 'narration', 'directive': 'transaction'}
         )
 
     def test_match_re_meta(self):
         self.match_any(MATCH_KEY_RE, "match-tx-meta-custom1", {
-            'field': 'meta',
+            'parameter': 'meta',
             'directive': 'tx',
             'meta': 'custom1'
         })
 
     def test_match_re_meta_with_dash(self):
         self.match_any(MATCH_KEY_RE, "match-tx-meta-custom1-field", {
-            'field': 'meta',
+            'parameter': 'meta',
             'directive': 'tx',
             'meta': 'custom1-field'
         })
 
     def test_match_re_meta_with_dash_no_entity(self):
         self.match_any(MATCH_KEY_RE, "match-meta-custom1-field", {
-            'field': 'meta',
+            'parameter': 'meta',
             'directive': None,
             'meta': 'custom1-field'
         })
@@ -73,9 +80,9 @@ class TestMatches(unittest.TestCase):
         """, Loader=yaml.FullLoader)
 
         r = Rule(rule)
-        r.compile(rule)
+
         expected_rule = MatchRule(
-            entity_type='transaction',
+            directive='transaction',
             parameter='narration',
             meta_key=None,
             regular_expressions={
@@ -104,7 +111,7 @@ class TestMatches(unittest.TestCase):
         r = Rule(rule)
         r.compile(rule)
         expected_rule = MatchRule(
-            entity_type='transaction',
+            directive='transaction',
             parameter='narration',
             meta_key=None,
             regular_expressions={
@@ -124,7 +131,7 @@ class TestMatchRule(unittest.TestCase):
 
     def test_eq(self):
         first = MatchRule(
-            entity_type='transaction',
+            directive='transaction',
             parameter='narration',
             meta_key=None,
             regular_expressions={
@@ -133,7 +140,7 @@ class TestMatchRule(unittest.TestCase):
         )
 
         second = MatchRule(
-            entity_type='transaction',
+            directive='transaction',
             parameter='narration',
             meta_key=None,
             regular_expressions={
@@ -148,7 +155,7 @@ class TestMatchRule(unittest.TestCase):
         self.assertEqual(first, second)
 
         third = MatchRule(
-            entity_type='transaction',
+            directive='transaction',
             parameter='payee',
             meta_key=None,
             regular_expressions={
@@ -160,3 +167,44 @@ class TestMatchRule(unittest.TestCase):
 
         # Make sure we can't missmatch these Rules
         self.assertRaises(AssertionError, first.extend, third)
+
+
+    def test_match_1(self):
+        entry = parser.parse_one("""
+2020-04-08 ! "AMZN Mktp US*L08746BB3"
+  match-key: "2020040824692160098100992944500"
+  ofx-type: "DEBIT"
+  * Liabilities:CreditCard:Chase:Amazon  -39.98 USD
+  ! Expenses:FIXME                        39.98 USD
+""")
+        assert entry.flag == "!"
+        ruler = Rule({
+            'match-narration': "AMZN Mktp *.",
+            'set-account': 'Expenses:Shopping'
+        })
+        result = ruler.check(entry)
+        self.assertIsNotNone(result)
+        new_entry = ruler.modify_entry(entry, result)
+        print(parser.printer.format_entry(new_entry))
+        self.assertEqual(new_entry.flag, '*')
+
+    def test_match_2(self):
+        entries, errors, options = parser.parse_string("""
+2020-04-01 * "AMZN Mktp US*L08746BB3"
+  match-narration: "AMZN Mktp.*"
+  * Liabilities:CreditCard:Chase:Amazon  -39.98 USD
+  * Expenses:Shopping:Amazon              39.98 USD
+
+2020-04-08 ! "AMZN Mktp US*L08746BB3"
+  match-key: "2020040824692160098100992944500"
+  ofx-type: "DEBIT"
+  * Liabilities:CreditCard:Chase:Amazon  -39.98 USD
+  ! Expenses:FIXME                        39.98 USD
+""")
+        result, errors  = matcher.match_directives(entries, {})
+        for entry in result:
+            logger.debug(f"{entry}")
+            logger.debug(f"{parser.printer.format_entry(entry)}")
+
+
+
