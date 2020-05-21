@@ -16,6 +16,8 @@ from ofxtools.models.bank.stmt import CCSTMTRS, STMTTRN
 from coolbeans import matcher
 
 
+logger = logging.getLogger(__name__)
+
 class Importer(importer.ImporterProtocol):
 
     def __init__(
