@@ -1,12 +1,11 @@
 import re
 import yaml
 import unittest
-import pprint
 import logging
 
 from beancount.parser import parser
 
-from coolbeans.rule import MATCH_KEY_RE, Rule, MatchRule
+from coolbeans.rule import KEY_RE, Rule, MatchRule
 from coolbeans import matcher
 
 
@@ -21,7 +20,6 @@ class TestMatches(unittest.TestCase):
         regex = None
         for regex in regex_list:
             match = regex.fullmatch(value)
-            print(f"{value} ?~ {regex} ({match})")
             if match:
                 break
 
@@ -31,8 +29,8 @@ class TestMatches(unittest.TestCase):
             self.assertEqual(expected_groupdict, match.groupdict(), f"{value} !! {regex}")
 
     def test_match_re_1(self):
-        self.match_any(MATCH_KEY_RE, "miss", None)
-        self.match_any(MATCH_KEY_RE, "match", {})
+        self.match_any(KEY_RE, "miss", None)
+        self.match_any(KEY_RE, "match", {})
 
     def test_match_re_3(self):
         self.match_any(MATCH_KEY_RE, "match-narration", {'parameter': 'narration'})
@@ -109,7 +107,7 @@ class TestMatches(unittest.TestCase):
         """, Loader=yaml.FullLoader)
 
         r = Rule(rule)
-        r.compile(rule)
+        r.add_directives(rule)
         expected_rule = MatchRule(
             directive='transaction',
             parameter='narration',
@@ -168,6 +166,15 @@ class TestMatchRule(unittest.TestCase):
         # Make sure we can't missmatch these Rules
         self.assertRaises(AssertionError, first.extend, third)
 
+    def test_add_rule_meta_acct(self):
+        rules = yaml.load("""
+- match-narration: E*TRADE DES:ACH.*
+  match-account: Assets:Banking:.*
+  set-posting-account: Assets:Transfer
+  set-posting-account-meta-account: Assets:Banking:ETrade:Cash
+""", Loader=yaml.FullLoader)
+        for rule in rules:
+            Rule(rule)
 
     def test_match_1(self):
         entry = parser.parse_one("""
@@ -185,11 +192,11 @@ class TestMatchRule(unittest.TestCase):
         result = ruler.check(entry)
         self.assertIsNotNone(result)
         new_entry = ruler.modify_entry(entry, result)
-        print(parser.printer.format_entry(new_entry))
         self.assertEqual(new_entry.flag, '*')
 
-    def test_match_2(self):
-        entries, errors, options = parser.parse_string("""
+    @parser.parse_doc()
+    def test_match_2(self, entries, errors, option_map):
+        """
 2020-04-01 * "AMZN Mktp US*L08746BB3"
   match-narration: "AMZN Mktp.*"
   * Liabilities:CreditCard:Chase:Amazon  -39.98 USD
@@ -200,11 +207,9 @@ class TestMatchRule(unittest.TestCase):
   ofx-type: "DEBIT"
   * Liabilities:CreditCard:Chase:Amazon  -39.98 USD
   ! Expenses:FIXME                        39.98 USD
-""")
+    """
         result, errors  = matcher.match_directives(entries, {})
         for entry in result:
-            logger.debug(f"{entry}")
-            logger.debug(f"{parser.printer.format_entry(entry)}")
 
-
+            self.assertEqual(entry.flag, '*')
 

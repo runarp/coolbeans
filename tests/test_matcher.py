@@ -136,9 +136,9 @@ class TestMatcher(unittest.TestCase):
 AMAZON_RULE = {
     # Match Any
     'match-narration': [
-        r"(?P<payee>Amazon.com|amzn mktp us)\*(?P<order_id>.*)",
-        r"(?P<payee>Amazon.com)\*(?P<order_id>.*)",
-        r"(?P<payee>amzn mktp us)\*(?P<order_id>.*)",
+        r"(?P<payee>Amazon.com|amzn mktp us)\*(?P<meta_order_id>.*)",
+        r"(?P<payee>Amazon.com)\*(?P<meta_order_id>.*)",
+        r"(?P<payee>amzn mktp us)\*(?P<meta_order_id>.*)",
     ],
     # AND Match Any
     'match-account': [
@@ -149,8 +149,7 @@ AMAZON_RULE = {
     # DO on the Transaction object
     'set-transaction': {
         "payee": "Amazon",
-        "tags": "kids",
-        "meta": {"order-id": "{order_id}"}
+        "tags": "kids"
     },
     # Do on the implied Posting:
     'set-posting': {

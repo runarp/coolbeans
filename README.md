@@ -102,3 +102,39 @@ Create a "Sorter" based on:
 * each year could be it's own bean file (or folder?)
 * At the start of the year a simple pad/balance can give a sane starting point
 * intra-Year accounts can be opened/closed, but generally are manged in the root file.
+
+### Filing Cabinet
+
+With the importers, bean-file and the account hierarchy as folder structure we
+have a pretty good foundation for a system to manage documents.  I'm not sure
+where the limits of this might be (number of files, search etc).  Some tools that
+might be interesting for my workflow are:
+
+* incoming folder monitor on Dropbox - My assistant can drop files into a folder
+  and they could get files.
+* slugs per account - with a slug we might be able to auto-file unknown files:
+    
+    YYYY-MM-DD-[slug]-[documenttype].pdf
+
+Would get picked up by an importer and [slug] -> Account could be handled via a 
+simple meta tag on open directive.
+
+given:
+
+  2010-01-01 open Assets:Employee:PettyCash:Jane
+      :slug: "pettycashjane"
+
+2020-02-03-pettycashjane-invoice.pdf  for example would get filed under the correct folder.
+
+Of course we could have plugins auto-add a slug to Accounts or any number of
+transformations.
+
+It would also be interesting to see the date-range covered by a single input file.
+This can be optional, but use bean-file:
+
+2020-03-01.
+
+
+#### 
+
+

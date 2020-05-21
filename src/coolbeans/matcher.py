@@ -47,58 +47,259 @@ are often in short-hand.  The compiled rules are instances of Rule.
 
 """
 
+# stdlib imports
+import pathlib
 import sys
 import re, yaml
 import pprint
 import logging
 import argparse
-from dataclasses import dataclass
-from typing import Dict, List, Iterator, Union, Optional
+import typing
+from typing import Dict, List, Iterator, Optional
+from dataclasses import dataclass, field
 
 from beancount.core import data
 from beancount.core.data import Directive, Entries
 from beancount.ingest import scripts_utils
 from beancount.ingest.extract import print_extracted_entries
-from beancount.parser.printer import format_entry
+from beancount.parser.printer import format_entry, print_entries
 
-from coolbeans.rule import Rule
-
+from coolbeans.rule import Rule, MATCH_CHECK
 
 logger = logging.getLogger(__name__)
 
+__plugins__ = (
+    'apply_coolbean_settings_plugin',
+    'match_directives_plugin',
+    'generate_new_rules_plugin'
+)
+__version__ = '1.0'
 
-__plugins__ = ('match_directives',)
+
+def safe_plugin(func: typing.Callable) -> typing.Callable:
+    def do_work(*args):
+        logger.info(f"Loading Pluggin {func.__name__}")
+        try:
+            return func(*args)
+        except Exception as e:
+            logger.exception(f"{func.__name__}")
+            raise
+
+    return do_work
 
 
-def match_directives(entries, options_map):
-    """Modify any entries that Match existing Rules"""
-    rules = []
-    # First Pass, Build a list of Match Rules
+def apply_coolbean_settings(entries, options_map):
+    settings = {}
     for entry in entries:
-        logger.debug(f"{type(entry)}: {repr(entry)}")
-        for key, value in entry.meta.items():
-            if key.startswith('match'):
-                rule = rule_from_meta(entry)
-                rules.append(rule)
-                break
+        if isinstance(entry, data.Custom):
+            if entry.type == "coolbeans":
+                param, value = entry.values
+                settings.setdefault(param.value, []).append(value.value)
+
+    options_map['coolbeans'] = settings
+
+    return entries, []
+
+
+apply_coolbean_settings_plugin = safe_plugin(apply_coolbean_settings)
+
+
+def match_directives(entries, options_map, *args):
+    """Modify any entries that Match existing Rules"""
+    MATCH_CHECK.clear()
+    rules = []
+
+    # Make sure to have run the apply_coolbeans_settings_plugin
+    settings = options_map['coolbeans']
+
+    # Load a rules.yaml type file
+    if 'rules-file' in settings:
+        # We support multiple Rules Files
+        for file_path in settings['rules-file']:
+            file = pathlib.Path(file_path)
+            if not file.exists():
+                logger.warning(f"Unable to find Rules File {file}")
+                continue
+
+            # Read the YAML file
+            with file.open("r") as stream:
+                new_rules = yaml.load(stream, Loader=yaml.FullLoader)
+
+            for rule in new_rules:
+                rules.append(
+                    Rule(rule)
+                )
+    output_file = settings.get('output-file', ['matched.bean'])[0]
+    output_file = pathlib.Path(output_file)
 
     new_entries = []
+    mod_entries = []
+    no_match_entries = []
+    possible_rules = {}
+
+    # Now, see what we can actually Match:
     for entry in entries:
+
         # We're only interested in Pending Entries
-        if entry.flag != '!':
+        if getattr(entry, 'flag', None) != '!':
+            # Pass through to new_entries
             new_entries.append(entry)
             continue
 
-        # Test against all of our Rules:
+        # Check against all the Rules:
+        modified = False
         for rule in rules:
             match_values = rule.check(entry)
+            if entry.narration.lower().startswith('airbnb') and match_values:
+                logger.info(f"{entry.narration.lower()}: {rule.match_requirements}: {match_values}")
             if match_values is None:
                 continue
             entry = rule.modify_entry(entry, match_values)
+            modified = True
+
+        # Always pass it to our output stream
         new_entries.append(entry)
 
+        if modified:
+            mod_entries.append(entry)
+        else:
+            no_match_entries.append(entry)
+
+    # We update the "suggestions" file
+    with output_file.open("w") as outstream:
+        print_entries(
+            mod_entries,
+            file=outstream
+        )
+        logger.info(f"cached: wrote {len(mod_entries)} entries to {output_file}")
+
+    return new_entries, []
+
+@dataclass
+class PossibleRule:
+    count: int = field(default=0)
+    entry: Optional[data.Transaction] = field(default=None)
+    narration: str = field(default="")
+    match_account: str = field(default="")
+    rule_account: str = field(default="")
+    tags: str = field(default="")
+    links: str = field(default="")
+    payee: str = field(default="")
+
+
+def generate_new_rules(entries, options_map):
+    """
+    A Helper function to dig through a list of entries and generate a rules
+    file. This is just a helper so you don't have to start with an empty file.
+    """
+
+    # Make sure to have run the apply_coolbeans_settings_plugin
+    settings = options_map['coolbeans']
+    rules_out_files: list = settings.get('gen-rules-file', [])
+    if not rules_out_files:
+        return
+    rules_out = pathlib.Path(rules_out_files[0])
+
+    # Generate a list of the good, bad and the ugly
+    good_entries: List[data.Transaction] = []
+    bad_entries: List[data.Transaction] = []
+
+    good_by_name: Dict[str, data.Transaction] = {}
+    bad_by_name: Dict[str, PossibleRule] = {}
+
+    for entry in entries:
+        if not isinstance(entry, data.Transaction):
+            continue
+        # The Good
+        if entry.flag == "*" and entry.narration:
+            good_entries.append(entry)
+            n = entry.narration.lower()
+            if n not in good_by_name:
+                good_by_name[n] = entry
+
+        # The Bad
+        elif entry.flag == "!" and entry.narration:
+            bad_entries.append(entry)
+            n = entry.narration.lower()
+            if n in bad_by_name:
+                possible = bad_by_name[n]
+                possible.count += 1
+            else:
+                possible = PossibleRule(
+                    entry=entry,
+                    narration=n,
+                )
+                bad_by_name[n] = possible
+
+    # Find Candidates for Rules (our bad entries)
+    new_rules = []
+    for n, possible in bad_by_name.items():
+        # Need to list the matching accounts etc.
+        account = ""
+        for posting in possible.entry.postings:
+            if posting.flag == "*":
+                account = posting.account
+        rule = {
+            'match-narration': n,
+            'match-account': account,
+            'comment': {'count': possible.count}
+        }
+        new_rules.append(rule)
+        new_rules.sort(key=lambda item: (item['comment']['count'], item['match-narration']))
+
+   #for entry in bad_entries:
+   #    # Keep a count of matches for this entry:
+   #    narration = entry.narration.lower().strip()
+
+   #    if narration not in good_by_name:
+   #        # Best Posting Account
+   #        account = ""
+   #        for posting in entry.postings:
+   #            if posting.flag == "*":
+   #                account = posting.account
+
+   #        narrations[narration] = dict(
+   #            count=0,
+   #            value=entry.narration,
+   #            account=account
+   #        )
+
+   ## Now generate rules for interesting transactions:
+   #rules = []
+   #for narration, details in narrations.items():
+   #    # Perhaps make this a configurable
+   #    if details['count'] <= 1:
+   #        continue
+   #    possible_entry = entry_by_name.get(details['value'], None)
+   #    new_rule = {
+   #        'match-narration': narration,
+   #        'match-account': details['account'],
+   #        'test': [details['value']]
+   #    }
+   #    if possible_entry:
+   #        if possible_entry:
+   #            target_account = None
+   #            for posting in possible_entry.postings:
+   #                if posting.account != details['account']:
+   #                    target_account = posting.account
+   #            if target_account:
+   #                new_rule['set-posting-account'] = target_account
+   #            if possible_entry.payee:
+   #                new_rule['set-payee'] = possible_entry.payee
+   #            if possible_entry.tags:
+   #                new_rule['set-transaction-tags'] = repr(possible_entry.tags)
+
+    with rules_out.open("w") as stream:
+        yaml.dump(new_rules, stream)
 
     return entries, []
+
+match_directives_plugin = safe_plugin(match_directives)
+generate_new_rules_plugin = safe_plugin(generate_new_rules)
+
+def generate_new_rules_file(entries, options_map):
+    """Let's find unmatched Entries and generate a rules file."""
+    pass
 
 
 def rule_from_meta(entry: data.Transaction) -> Rule:
@@ -106,88 +307,22 @@ def rule_from_meta(entry: data.Transaction) -> Rule:
     Copy the Narration, Payee, Tags, Expense Account etc.
     """
     rs = {}
-    if entry.tags: rs['set-tags'] = entry.tags
-    if entry.payee: rs['set-payee'] = entry.payee
+    if entry.tags:
+        rs['set-tags'] = entry.tags
+    if entry.payee:
+        rs['set-payee'] = entry.payee
+
     for posting in entry.postings:
-        if posting.meta.get('match-lock'):
+        if posting.account.startswith('Expenses'):
             rs['set-posting-account'] = posting.account
 
     for k, v in entry.meta.items():
         if k.startswith('match-') or k.startswith('set-'):
             rs[k] = v
+    r = Rule(rs)
 
-    return Rule(rs)
-
-
-def mainX():
-    some_data = [
-        "Amazon.com*MO7IO3OL2",
-        "AMZN Mktp US*MA23B5WO1",
-        "Amazon.com*MA4TS16T0",
-        "AMZN Mktp US*MA0HF9660",
-        "AMZN Mktp US*MA4O62W21",
-        "PAL AIR     0797335735638",
-        "STARBUCKS BORACAY AIRP AKLAN",
-        "GRAB *40438931-9-103",
-    ]
-
-    rex_list = [
-        r"(?P<payee>Amazon.com|amzn mktp us)\*(?P<order_id>.*)",
-        r"(?P<payee>Amazon.com)\*(?P<order_id>.*)",
-        r"(?P<payee>amzn mktp us)\*(?P<order_id>.*)",
-        r"(?P<payee>starbucks)\s*(?P<location_id>.*)",
-        r"(?P<payee>pal air)\s*(?P<location_id>.*)",
-    ]
-
-    rex_list = yaml.load(yaml.dump(rex_list), Loader=yaml.FullLoader)
-
-    for memo in some_data:
-        for rex in rex_list:
-            result: re.Match = re.match(rex, memo, re.IGNORECASE)
-#           if result:
-#               print(f"{rex} MATCH!\n{memo}\n{result.groupdict()}")
-
-    sample_struct = [
-        {
-            # Match Any
-            'match-narration': [
-                r"(?P<payee>Amazon.com|amzn mktp us)\*(?P<order_id>.*)",
-                r"(?P<payee>Amazon.com)\*(?P<order_id>.*)",
-                r"(?P<payee>amzn mktp us)\*(?P<order_id>.*)",
-            ],
-            # Optional, Match Any
-            'match-account': [
-                r"Liabilities:.*"
-            ],
-            'set-transaction': {
-                "payee": "Amazon",
-                "tags": "kids",
-                "meta": {"order-id": "{order_id}"}
-            },
-            'set-posting': {
-                "account": "Expenses:Shopping",
-            },
-            'tests': {
-                "Amazon.com*MO7IO3OL2": {
-                    'order_id': 'MO7IO3OL2'
-                },
-                "Azure*MO7IO3OL2": {
-                    'match': False
-                },
-                "AMZN Mktp US*MA23B5WO1": {
-                    'order_id': 'MA23B5WO1',
-                    'payee': 'AMZN Mktp US'
-                }
-            }
-        },
-        {
-            'match-narration': r"(?P<payee>starbucks)\s*(?P<meta_location_id>.*)",
-            'set-posting-account': 'Expenses:Dining:Coffee',
-        }
-    ]
-    dumped = yaml.dump(sample_struct)
-    loaded = yaml.load(dumped, Loader=yaml.FullLoader)
-    # pprint.pprint(loaded)
+    logger.info(f"Created a Fancy Rule: {rs} -> {repr(r)}")
+    return r
 
 @dataclass
 class Match:
@@ -241,11 +376,8 @@ class Matcher:
         if not isinstance(entry, data.Transaction):
             return False
 
-
         matches = {'parameters': {}}
         for param, expressions in self.expand_match_fields(rule).items():
-
-            # print(f"{param}, {expressions}")
 
             # param is the Transaction Attribute we match on
             # expressions is a list of regular expressions
@@ -294,7 +426,7 @@ class Matcher:
         else:
             return
 
-    def find_matches(self, existing_entries:Entries) -> Iterator[Match]:
+    def find_matches(self, existing_entries: Entries) -> Iterator[Match]:
         for entry in existing_entries:
             # Check Entry Type
             if not isinstance(entry, data.Transaction):
@@ -344,12 +476,12 @@ class Matcher:
             assert action == 'set'
             if entry_type == 'transaction':
                 # Should Eval the
-                entry = entry._replace(**{field:value})
+                entry = entry._replace(**{field: value})
             elif entry_type == 'posting':
                 postings = []
                 for posting in entry.postings:
                     if posting.flag == '!':
-                        posting = posting._replace(**{field:value, 'flag':'M'})
+                        posting = posting._replace(**{field: value, 'flag': 'M'})
 
                     postings.append(posting)
                 entry = entry._replace(postings=postings, flag='*')
@@ -358,7 +490,7 @@ class Matcher:
             # pprint.pprint(match)
             for field, value in match['matches']['parameters'].items():
                 if field == "payee" and not entry.payee:
-                    entry = entry._replace(payee=value.title()) # Propercase
+                    entry = entry._replace(payee=value.title())  # Propercase
                 if field.startswith('meta_'):
                     meta_name = field[5:]
                     entry.meta[meta_name] = value
@@ -374,15 +506,16 @@ class Matcher:
             results.append(match)
         return results
 
+
 def add_arguments(parser):
-    """Called by bean framework"""
+    """Possibly hook entry point bean CLI.  But we call directly for now."""
     parser.add_argument(
         '-e', '-f', '--existing', '--previous',
         metavar='BEANCOUNT_FILE',
         default=None,
         help=('Beancount file or existing entries for de-duplication '
               '(optional)')
-        )
+    )
     parser.add_argument(
         '-r', '--rules',
         action='store',
@@ -394,51 +527,26 @@ def add_arguments(parser):
     )
     return parser
 
+
 def main():
     parser = argparse.ArgumentParser()
     add_arguments(parser)
     args = parser.parse_args()
 
-    logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
+    logging.basicConfig(
+        stream=sys.stderr,
+        level=logging.DEBUG
+    )
 
     from beancount import loader
-    from beancount.core import data
 
-    # Load it
+    # Load the beanfile
     entries, errors, options_map = loader.load_file(args.existing)
 
-    rules:List[Rule] = []
+    new_entries = match_directives(entries, options_map)
 
-    for entry in entries:
-#       if isinstance(entry, data.Custom):
+    rules: List[Rule] = []
 
-        if 'match-re' in entry.meta:
-            value = entry.meta['match-re']
-            regex = re.compile(str(value))
-            match = regex.match(str(entry.narration))
-            # match = re.match(regex, str(entry.narration))
-            if not match:
-                logger.warning(f"Ignoring failing {regex} on {entry.narration}")
-                continue
-            rules.append(
-                {'match-narration': value,
-                 'set-posting-account': entry.postings[-1].account,
-                 'set-transaction-payee': entry.payee
-                }
-            )
-    m = Matcher(rules)
-    updated_entries = []
-
-    if args.rules:
-        m.load_yaml_file(args.rules)
-
-    result = m.process(entries)
-
-    for obj in result:
-        updated_entries.append(obj['entry'])
-
-    print_extracted_entries(updated_entries, sys.stdout)
 
 if __name__ == "__main__":
     main()
-
