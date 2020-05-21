@@ -11,7 +11,7 @@ from coolbeans import matcher
 
 logger = logging.getLogger(__name__)
 
-
+@unittest.skip("Legacy Version")
 class TestMatches(unittest.TestCase):
 
     def match_any(self, regex_list, value, expected_groupdict):
@@ -124,7 +124,7 @@ class TestMatches(unittest.TestCase):
             r.match_requirements
         )
 
-
+@unittest.skip("Legacy Version")
 class TestMatchRule(unittest.TestCase):
 
     def test_eq(self):

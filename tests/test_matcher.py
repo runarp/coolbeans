@@ -156,18 +156,18 @@ AMAZON_RULE = {
         "account": "Expenses:Shopping",
     },
     # Make sure we have Sane Regex:
-    'test': {
-        "Amazon.com*MO7IO3OL2": {
-            'order_id': 'MO7IO3OL2'
-        },
-        "Azure*MO7IO3OL2": {
-            'match': False
-        },
-        "AMZN Mktp US*MA23B5WO1": {
-            'order_id': 'MA23B5WO1',
-            'payee': 'AMZN Mktp US'
-        }
-    }
+#   'test': {
+#       "Amazon.com*MO7IO3OL2": {
+#           'order_id': 'MO7IO3OL2'
+#       },
+#       "Azure*MO7IO3OL2": {
+#           'match': False
+#       },
+#       "AMZN Mktp US*MA23B5WO1": {
+#           'order_id': 'MA23B5WO1',
+#           'payee': 'AMZN Mktp US'
+#       }
+#   }
 }
 from beancount.parser.parser import parse_many
 TEST_ENTIRES = parse_many("""
