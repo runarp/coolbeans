@@ -20,8 +20,8 @@ from beancount.ingest import importer
 from beancount.parser import parser
 from beancount.core import data
 
-FILE_REX = (r"(?P<year>\d\d\d\d)-(?P<month>\d\d)-(?P<day>\d\d)"
-            r"[-.](?P<slug>\w+)-(?P<document>\w+)\.(?P<ext>pdf|jpg|txt|ofx|png)")
+FILE_REX = (r"^(?P<year>\d\d\d\d)-(?P<month>\d\d)-(?P<day>\d\d)"
+            r"[-.](?P<slug>[\w-]+).(?P<document>[\w-]+)\.(?P<ext>\w+)$")
 FILE_RE = re.compile(FILE_REX, re.IGNORECASE)
 
 
@@ -110,4 +110,4 @@ class Importer(importer.ImporterProtocol):
         """Returns the name without the date prtion"""
         logger.debug(f"file_name({file}")
         fd = self._expand_file(file)
-        return f"{fd.slug}-{fd.document}.{fd.ext}"
+        return f"{fd.slug}.{fd.document}.{fd.ext}".lower()

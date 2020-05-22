@@ -150,21 +150,29 @@ class Entry:
 
     @property
     def tags(self):
-        if self.row.tag:
-            return {self.row.tag}
+        tag = slugify(self.row.tag).strip()
+        if tag:
+            return {tag}
         else:
             return set()
 
     @property
     def links(self):
         if self.row.invoice:
-            return {self.row.invoice}
+            return {f"INV-{slugify(self.row.invoice)}"}
         else:
             return set()
 
     @property
     def narration(self):
         return self.row.narration
+
+    @property
+    def entry_type(self):
+        if self.row.tx_type.strip().lower() == 'opnun':
+            return "Balance"
+        else:
+            return "Transaction"
 
     @property
     def meta(self):
@@ -174,6 +182,8 @@ class Entry:
             'lineno': 0,
             'filename': ""
         }
+        if self.row.tx_type:
+            meta['tx-type'] = self.row.tx_type.lower()
         if self.row.account_name:
             meta['description'] = self.row.account_name
         return meta
@@ -191,9 +201,17 @@ class Importer(importer.ImporterProtocol):
     Bókhaldslykill, Heiti lykils, Dagsetning, Undirlykill, Tilvísun, Fylgiskjal, Reikningur, Lýsing, Upphæð, Staða, Tegund færslu, Erl.jöfnuður
     """
 
+    gl_records: typing.Dict[str, typing.List[Entry]] = {}
+    entries: typing.List[data.Directive] = []
+    new_accounts:typing.Set[str] = set()
+
     def __init__(self, accounts: typing.Dict[str, str]):
         """Accepts a dict of account number in DK to our Account Name"""
         self.accounts  = accounts
+
+        self.gl_records = {}
+        self.entries = []
+        self.new_accounts = set(["Equity:OpeningBalances"])
 
     def extract(self, file: FileMemo, existing_entries=None):
         self.read_file(file.name)
@@ -225,6 +243,10 @@ class Importer(importer.ImporterProtocol):
         return "d2.full.csv"
 
     def read_file(self, file_name: str):
+        if self.gl_records:
+            # File has already been read
+            return None
+
         format = Format(DK_COLUMNS)
 
         with open(file_name, "r") as stream:
@@ -248,17 +270,15 @@ class Importer(importer.ImporterProtocol):
         # Now Generate the self.entries
         self.generate_transactions()
 
-    gl_records: typing.Dict[str, typing.List[Entry]] = {}
     def add_record(self, record: Entry):
         """Add a single Record.  """
         self.gl_records.setdefault(
             record.gl_id, []).append(record)
 
-    entries = []
     def generate_transactions(self):
         """Iterate through the GL Records, generate entries"""
         for entries in self.gl_records.values():
-            self.entries.append(
+            self.entries.extend(
                 self.entry_from_gl(entries)
             )
 
@@ -276,9 +296,8 @@ class Importer(importer.ImporterProtocol):
                 )
             )
 
-    new_accounts = set()
 
-    def entry_from_gl(self, entries: typing.List[Entry]):
+    def entry_from_gl(self, entries: typing.List[Entry]) -> typing.Iterable:
         """Given a single GL_ID and as a list of Entrys
         """
         first = entries[0]
@@ -295,27 +314,55 @@ class Importer(importer.ImporterProtocol):
         for entry in entries:
             self.new_accounts.add(entry.account)
 
-            posting = data.Posting(
-                entry.account,
-                data.Amount(entry.amount, entry.currency),
-                None,
-                None,
+            if first.entry_type == "Balance":
+                if entry.amount and entry.date.year == 2016:
+                    yield data.Pad(
+                        date=entry.date-datetime.timedelta(days=1),
+                        account=entry.account,
+                        source_account="Equity:OpeningBalances",
+                        meta={
+                            'lineno': 0,
+                            'filename': '',
+                            'note': entry.narration,
+                            'gl-id': entry.gl_id
+                        }
+                    )
+                yield data.Balance(
+                    date=entry.date,
+                    amount=data.Amount(entry.amount, entry.currency),
+                    account=entry.account,
+                    tolerance=None,
+                    diff_amount=None,
+                    meta={
+                        'lineno': 0,
+                        'filename': '',
+                        'note': entry.narration,
+                        'gl-id': entry.gl_id
+                    }
+                )
+            else:
+                posting = data.Posting(
+                    entry.account,
+                    data.Amount(entry.amount, entry.currency),
+                    None,
+                    None,
+                    flag='*',
+                    meta=entry.meta
+                )
+                all_tags.update(entry.tags)
+                all_links.update(entry.links)
+
+                postings.append(posting)
+                all_meta.update(posting.meta or {})
+
+        if postings:
+            yield data.Transaction(
+                meta=all_meta,
+                date=entry.date,
                 flag='*',
-                meta=entry.meta
+                payee=entry.payee,
+                narration=entry.narration,
+                tags=all_tags,
+                links=all_links,
+                postings=postings
             )
-            all_tags.union(entry.tags)
-            all_links.union(entry.links)
-
-            postings.append(posting)
-            all_meta.update(posting.meta or {})
-
-        return data.Transaction(
-            meta=all_meta,
-            date=entry.date,
-            flag='*',
-            payee=entry.payee,
-            narration=entry.narration,
-            tags=all_tags,
-            links=all_links,
-            postings=postings
-        )
