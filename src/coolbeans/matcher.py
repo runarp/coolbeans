@@ -58,12 +58,15 @@ import typing
 from typing import Dict, List, Iterator, Optional
 from dataclasses import dataclass, field
 
+# Beancount Imports
 from beancount.core import data
 from beancount.core.data import Directive, Entries
 from beancount.ingest import scripts_utils
 from beancount.ingest.extract import print_extracted_entries
-from beancount.parser.printer import format_entry, print_entries
+from beancount.parser.printer import format_entry, print_entries, print_errors
 
+# Local imports
+from coolbeans.utils import safe_plugin
 from coolbeans.rule import Rule, MATCH_CHECK
 
 logger = logging.getLogger(__name__)
@@ -74,19 +77,6 @@ __plugins__ = (
     'generate_new_rules_plugin'
 )
 __version__ = '1.0'
-
-
-def safe_plugin(func: typing.Callable) -> typing.Callable:
-    def do_work(*args):
-        logger.info(f"Loading Pluggin {func.__name__}")
-        try:
-            return func(*args)
-        except Exception as e:
-            logger.exception(f"{func.__name__}")
-            raise
-
-    return do_work
-
 
 def apply_coolbean_settings(entries, options_map):
     settings = {}
@@ -247,47 +237,47 @@ def generate_new_rules(entries, options_map):
         new_rules.append(rule)
         new_rules.sort(key=lambda item: (item['comment']['count'], item['match-narration']))
 
-   #for entry in bad_entries:
-   #    # Keep a count of matches for this entry:
-   #    narration = entry.narration.lower().strip()
+    #for entry in bad_entries:
+    #    # Keep a count of matches for this entry:
+    #    narration = entry.narration.lower().strip()
 
-   #    if narration not in good_by_name:
-   #        # Best Posting Account
-   #        account = ""
-   #        for posting in entry.postings:
-   #            if posting.flag == "*":
-   #                account = posting.account
+    #    if narration not in good_by_name:
+    #        # Best Posting Account
+    #        account = ""
+    #        for posting in entry.postings:
+    #            if posting.flag == "*":
+    #                account = posting.account
 
-   #        narrations[narration] = dict(
-   #            count=0,
-   #            value=entry.narration,
-   #            account=account
-   #        )
+    #        narrations[narration] = dict(
+    #            count=0,
+    #            value=entry.narration,
+    #            account=account
+    #        )
 
-   ## Now generate rules for interesting transactions:
-   #rules = []
-   #for narration, details in narrations.items():
-   #    # Perhaps make this a configurable
-   #    if details['count'] <= 1:
-   #        continue
-   #    possible_entry = entry_by_name.get(details['value'], None)
-   #    new_rule = {
-   #        'match-narration': narration,
-   #        'match-account': details['account'],
-   #        'test': [details['value']]
-   #    }
-   #    if possible_entry:
-   #        if possible_entry:
-   #            target_account = None
-   #            for posting in possible_entry.postings:
-   #                if posting.account != details['account']:
-   #                    target_account = posting.account
-   #            if target_account:
-   #                new_rule['set-posting-account'] = target_account
-   #            if possible_entry.payee:
-   #                new_rule['set-payee'] = possible_entry.payee
-   #            if possible_entry.tags:
-   #                new_rule['set-transaction-tags'] = repr(possible_entry.tags)
+    ## Now generate rules for interesting transactions:
+    #rules = []
+    #for narration, details in narrations.items():
+    #    # Perhaps make this a configurable
+    #    if details['count'] <= 1:
+    #        continue
+    #    possible_entry = entry_by_name.get(details['value'], None)
+    #    new_rule = {
+    #        'match-narration': narration,
+    #        'match-account': details['account'],
+    #        'test': [details['value']]
+    #    }
+    #    if possible_entry:
+    #        if possible_entry:
+    #            target_account = None
+    #            for posting in possible_entry.postings:
+    #                if posting.account != details['account']:
+    #                    target_account = posting.account
+    #            if target_account:
+    #                new_rule['set-posting-account'] = target_account
+    #            if possible_entry.payee:
+    #                new_rule['set-payee'] = possible_entry.payee
+    #            if possible_entry.tags:
+    #                new_rule['set-transaction-tags'] = repr(possible_entry.tags)
 
     with rules_out.open("w") as stream:
         yaml.dump(new_rules, stream)
@@ -332,6 +322,7 @@ class Match:
 
 
 class Matcher:
+    """Most of this code is dead."""
     rules: List[Rule] = None
 
     def __init__(self, rules=None):
@@ -340,13 +331,7 @@ class Matcher:
         if rules:
             self.add_rules(rules)
 
-    def load_yaml_file(self, file_name):
-        with open(file_name, "r") as fil:
-            rules = yaml.load(fil, Loader=yaml.FullLoader)
-            self.validate_rules(rules)
-            self.rules.extend(rules)
-
-    def add_rules(self, rules: List[Rule]):
+    def add_rules(self, rules: List[dict]):
         for rule_dict in rules:
             self.rules.append(Rule(rule_dict))
 
@@ -364,54 +349,6 @@ class Matcher:
         if attribute == 'account':
             return [p.account for p in entry.postings]
         raise ValueError(f"Unknown attribute {attribute}")
-
-    def match_rule(self, entry: data.Transaction, rule):
-        """Match a Single Rule to a Transaction.
-
-        Returns either None or an object describing the Match.
-        """
-        logger.debug(f"""Matching: {format_entry(entry)}""")
-
-        # Only support Transactions atm
-        if not isinstance(entry, data.Transaction):
-            return False
-
-        matches = {'parameters': {}}
-        for param, expressions in self.expand_match_fields(rule).items():
-
-            # param is the Transaction Attribute we match on
-            # expressions is a list of regular expressions
-            found = False
-            for pattern in expressions:
-
-                entry_values = self.get_entry_values(entry, param)
-
-                for value in entry_values:
-                    match_obj = re.match(pattern, value, flags=re.IGNORECASE)
-                    if value.lower().find("amazon") >= 0:
-                        logger.info(f"Looking at {param}: {value} {pattern} {match_obj}")
-
-                    if match_obj:
-                        # Capture the details of this Match, strip whitespace just for good measure
-                        matches['parameters'].update(dict((k, v.strip()) for k, v in match_obj.groupdict().items()))
-                        matches[param] = {
-                            'match-parameter': param,
-                            'match-value': value,
-                            'match-group': match_obj.groupdict()
-                        }
-                        found = True
-                        logger.debug(f"Found! {matches}")
-
-                        break
-                if found:
-                    break
-
-            # This is completely Broken.
-            if not found:
-                logger.debug(f"Return NO MATCHES")
-                return {}
-        logger.debug(f"Returning {matches}")
-        return matches
 
     def match(self, entry: Directive) -> Optional[Match]:
         """Accepts a BeanCount Entry and tries to find a Matching Rule."""
@@ -516,19 +453,22 @@ def add_arguments(parser):
         help=('Beancount file or existing entries for de-duplication '
               '(optional)')
     )
-    parser.add_argument(
-        '-r', '--rules',
-        action='store',
-        metavar='RULES_FILENAME',
-        help=(
-            'Rules specification file. '
-            'This is a YAML file with Match Rules '
-        )
-    )
+
+    #  parser.add_argument(
+    #      '-r', '--rules',
+    #      action='store',
+    #      metavar='RULES_FILENAME',
+    #      help=(
+    #          'Rules specification file. '
+    #          'This is a YAML file with Match Rules '
+    #      )
+    #  )
     return parser
 
 
 def main():
+    # We don't do much other the validate the file
+    # The File needs to load the plugin coolbean.matcher
     parser = argparse.ArgumentParser()
     add_arguments(parser)
     args = parser.parse_args()
@@ -543,9 +483,8 @@ def main():
     # Load the beanfile
     entries, errors, options_map = loader.load_file(args.existing)
 
-    new_entries = match_directives(entries, options_map)
-
-    rules: List[Rule] = []
+    if errors:
+        print_errors(errors)
 
 
 if __name__ == "__main__":
