@@ -175,7 +175,7 @@ class MatchRule(DirectiveAttribute):
         for reg in self.regular_expressions:
             match = reg.match(value)
             if match:
-                logger.info(f"Match:   {value:40} : {reg}")
+                #  logger.info(f"Match:   {value:42} : {reg}")
                 if hasattr(match, 'groupdict'):
                     history[reg] = match.groupdict()
                     return match.groupdict()

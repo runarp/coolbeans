@@ -150,6 +150,7 @@ setup(
         'ofxtools',
         'beancount',
         'pyyaml',
+        'python-slugify'
     ],  # Optional
 
     # List additional groups of dependencies here (e.g. development
@@ -163,6 +164,7 @@ setup(
     extras_require={  # Optional
         'dev': ['check-manifest'],
         'test': ['coverage', 'nose'],
+        'sheets': ['gspread', 'oauth2client'],
     },
 
     # If there are data files included in your packages that need to be

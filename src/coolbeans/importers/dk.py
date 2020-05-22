@@ -41,6 +41,7 @@ DK_COLUMNS = {
     "Erl.jöfnuður": 'foreign_balance'
 }
 
+
 class Format:
     def __init__(self, name_map):
         self.by_col = {}

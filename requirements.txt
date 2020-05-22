@@ -3,3 +3,6 @@ beancount
 ibflex
 ofxtools
 pyyaml
+slugify
+gspread
+oauth2client
