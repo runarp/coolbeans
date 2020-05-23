@@ -100,12 +100,27 @@ def remote_accounts(entries, options_map):
     append_to_sheet = []
     open_by_account = {}
 
-    # Existing Accounts:
+    # Some Account Trees Should be Hidden, use a 'hidden': 1 Meta
+    hidden_prefixes = set()
     for entry in entries:
         if not isinstance(entry, data.Open):
             continue
+        hidden = entry.meta.get('hidden', 0)
+        if bool(int(hidden)):
+            hidden_prefixes.add(entry.account)
 
+    # Make a List of Local Entries, not on the Sheet
+    for entry in entries:
+        if not isinstance(entry, data.Open):
+            continue
+        match = False
+        for hidden_name in hidden_prefixes:
+            if entry.account.startswith(hidden_name):
+                match = True
+                break
         open_by_account[entry.account] = entry
+        if match:
+            continue
 
         if entry.account not in sheet_by_name:
             # Skip these things
@@ -121,11 +136,23 @@ def remote_accounts(entries, options_map):
             }
             append_to_sheet.append(new_account)
 
-    # Write any New Entries to our new accounts bean:
+    # Make a List of Entries on the Sheet but Not in our Books
     new_entries = []
     for account, record in sheet_by_name.items():
         if account in open_by_account:
+            # This _might_ be a modified entry, in which case we should use
+            # Meta Attributes set in the Sheet!
+            open_entry: data.Open = open_by_account[account]
+            sheet_entry: dict = record
+            compare_fields = ('slug', 'account_number', 'institution')
+            for field in compare_fields:
+                sheet_val = str(sheet_entry[field])
+                if sheet_val and sheet_val != open_entry.meta.get(field, None):
+                    open_entry.meta[field] = sheet_val
+                    if open_entry not in new_entries:
+                        new_entries.append(open_entry)
             continue
+
         logging.info(f"New Account {account} from sheet: {record}.")
         # noinspection PyBroadException
         try:
@@ -160,15 +187,13 @@ def remote_accounts(entries, options_map):
             logger.info(f"Wrote {len(new_entries)} new account(s) to {new_accounts_path}.")
 
 
+    # Write all the entries back to the sheet
     append_to_sheet.sort(key=lambda x: x['account'])
-    # Write these back to the sheet
     header = sheet.row_values(1)
-    logger.info(f"Got Header: {header}")
     rows = []
     for item in append_to_sheet:
         row = [str(item.get(f, '')) for f in header]
         rows.append(row)
-
     sheet.update([header]+rows)
 
     return entries, []
