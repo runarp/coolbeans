@@ -175,6 +175,7 @@ class PossibleRule:
     tags: str = field(default="")
     links: str = field(default="")
     payee: str = field(default="")
+    amounts: list = field(default_factory=list)
 
 
 def generate_new_rules(entries, options_map):
@@ -221,18 +222,30 @@ def generate_new_rules(entries, options_map):
                 )
                 bad_by_name[n] = possible
 
+            for posting in entry.postings:
+                amt = float(abs(posting.units.number))
+                if amt not in possible.amounts:
+                    possible.amounts += [amt]
+
+
     # Find Candidates for Rules (our bad entries)
     new_rules = []
     for n, possible in bad_by_name.items():
         # Need to list the matching accounts etc.
         account = ""
         for posting in possible.entry.postings:
+
+            # Check for the amounts for our new-rules
+            amt = float(abs(posting.units.number))
+            if amt not in possible.amounts:
+                possible.amounts += [amt]
+
             if posting.flag == "*":
                 account = posting.account
         rule = {
             'match-narration': n,
             'match-account': account,
-            'comment': {'count': possible.count}
+            'comment': {'count': possible.count, 'amounts':possible.amounts}
         }
         new_rules.append(rule)
         new_rules.sort(key=lambda item: (item['comment']['count'], item['match-narration']))
