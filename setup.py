@@ -164,7 +164,7 @@ setup(
     extras_require={  # Optional
         'dev': ['check-manifest'],
         'test': ['coverage', 'nose'],
-        'sheets': ['gspread', 'oauth2client'],
+        'sheets': ['gspread', 'oauth2client', 'dateparser'],
     },
 
     # If there are data files included in your packages that need to be

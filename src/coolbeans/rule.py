@@ -241,19 +241,15 @@ class Rule:
 
     def expand_rule_dict(self, rule_dict: dict) -> Iterator[DirectiveAttribute]:
 
-        logger.debug(f"checking on rule_dict: {pprint.pformat(rule_dict)}")
-
         for key, value in rule_dict.items():
             if key == 'match-key': continue
             key_match = match_any_re(KEY_RE, key)
-            logger.debug(f"match: {key_match}")
 
             if key_match is None:
                 raise ValueError(f"Invalid Key format {key} in {rule_dict}")
 
             response = key_match
             self.default_key_match(key_match)
-            logger.debug(f"defaulted-match: {key_match}")
 
             command = response.pop('command', None)
             parameter = response.pop('parameter', None)
@@ -265,7 +261,6 @@ class Rule:
                 parameter=parameter,
                 meta_key=response.get('meta_key', None),
             )
-            logger.debug(f"Directive attr= {attr}")
 
             if command == 'test':
                 attr.value = value
@@ -382,7 +377,6 @@ class Rule:
 
         # Pre-process match_value?
         for sr in self.set_rules:
-            logger.debug(f"*** {repr(sr)}\n{repr(entry)}")
 
             if sr.directive == 'transaction':
                 # Should Possible Eval the Value?

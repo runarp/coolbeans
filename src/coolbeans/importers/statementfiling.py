@@ -1,95 +1,56 @@
 """
-This Importer doesn't actuall import.  It just provides
+This Importer doesn't actually import.  It just provides
 a parser to identify the account/date related to a file
 provided that the file is in a certain format.
 
-YYYY-MM-DD-SLUG-TYPE.EXT
+YYYY-MM-DD.SLUG.TYPE.EXT
 
 If there's a meta['slug'] on any account directive that lines up
-with this account, we will identify this file.
+with this account, we will identify the file.
+
 """
 import re
 import datetime
-import dataclasses
-from typing import Optional
 import logging
 import pathlib
-from beancount.ingest.cache import _FileMemo as FileMemo
+import os
+import sys
 
+
+from beancount.ingest.cache import _FileMemo as FileMemo
 from beancount.ingest import importer
+from beancount.loader import load_file
 from beancount.parser import parser
 from beancount.core import data
+from coolbeans.tools.namematch import expand_file
 
-FILE_REX = (r"^(?P<year>\d\d\d\d)-(?P<month>\d\d)-(?P<day>\d\d)"
-            r"[-.](?P<slug>[\w-]+).(?P<document>[\w-]+)\.(?P<ext>\w+)$")
-FILE_RE = re.compile(FILE_REX, re.IGNORECASE)
-
+BEAN_FILE_ENV = 'BEAN_FILE'
 
 logger = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass()
-class FileDetails:
-    file: pathlib.Path
-    file_name: str
-    slug: str
-    ext: str
-    document: str
-    date: datetime.datetime
-
-
 class Importer(importer.ImporterProtocol):
 
-    def __init__(self, beanfile):
+    def __init__(self, beanfile: str=None):
+        if beanfile is None:
+            beanfile = os.environ.get(BEAN_FILE_ENV, None)
+
+        assert pathlib.Path(beanfile).exists(), f"Unable to find bean file {beanfile}."
+
         self._auto_configure(beanfile)
 
-    def _auto_configure(self, beanfile):
-        logger.debug(f"Reading {beanfile}")
-        slugs = {}
-        entries, errors, context = parser.parse_file(beanfile)
-        for entry in entries:
-            if isinstance(entry, data.Open):
-                slug = entry.meta.get('slug', None)
-                if slug:
-                    logger.debug(f"Found Slug {slug} for {entry.account}")
-                    slugs[slug.lower()] = entry.account
-        self.slugs = slugs
-
-    def _expand_file(self, file_path) -> Optional[FileDetails]:
-        try:
-            if isinstance(file_path, FileMemo):
-                file_path = file_path.name
-            full_file = pathlib.Path(file_path)
-            file = full_file.name
-
-            logger.debug(f"Checking {file}")
-            match = FILE_RE.match(file)
-            if not match:
-                return None
-            matchgroup = match.groupdict()
-            file_date = datetime.datetime(int(matchgroup['year']),
-                                          int(matchgroup['month']),
-                                          int(matchgroup['day']))
-            fd = FileDetails(
-                file=full_file,
-                file_name=file,
-                slug=matchgroup['slug'].lower(),
-                ext=matchgroup['ext'],
-                document=matchgroup['document'],
-                date=file_date
-            )
-            logger.debug(f"Created File: {fd}")
-        except Exception:
-            logger.exception(f"While parsing {file_path}")
-            raise
-        return fd
+    def _auto_configure(self, beanfile: str):
+        """Given a beancount file, extract any Open tag 'slug' meta data."""
+        entries, errors, context = load_file(beanfile, log_errors=sys.stderr)
+        assert 'slugs' in context, "Requires 'coolbeans.plugins.slugs'"
+        self.slugs = context['slugs']
 
     def name(self):
-        return f"slugger"
+        return f"filing"
 
     def identify(self, file: FileMemo) -> bool:
         try:
-            fd = self._expand_file(file.name)
+            fd = expand_file(file.name)
             if fd.slug:
                 return True
         except:
@@ -97,17 +58,19 @@ class Importer(importer.ImporterProtocol):
 
     def file_account(self, file):
         logger.debug(f"file_account({file}")
-        fd = self._expand_file(file)
-        if fd is None: return None
+        fd = expand_file(file)
+        if fd is None:
+            return None
         return self.slugs[fd.slug]
 
     def file_date(self, file) -> datetime.datetime:
         logger.debug(f"file_date({file}")
-        fd = self._expand_file(file)
+        fd = expand_file(file)
         return fd.date
 
     def file_name(self, file):
-        """Returns the name without the date prtion"""
-        logger.debug(f"file_name({file}")
-        fd = self._expand_file(file)
+        """Returns the name without the date portion"""
+        logger.debug(f"file_name({file})")
+        fd = expand_file(file)
+
         return f"{fd.slug}.{fd.document}.{fd.ext}".lower()

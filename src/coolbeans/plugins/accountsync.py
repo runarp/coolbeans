@@ -130,7 +130,7 @@ def remote_accounts(entries, options_map):
                 'account': entry.account,
                 'currencies': ','.join(entry.currencies or []),
                 'slug': entry.meta.get('slug', ''),
-                'account_number': entry.meta.get('account_number', ''),
+                'account_number': str(entry.meta.get('account_number', '')),
                 'institution': entry.meta.get('institution', ''),
                 'date': entry.date.strftime("%Y-%m-%d")
             }
@@ -153,7 +153,7 @@ def remote_accounts(entries, options_map):
                         new_entries.append(open_entry)
             continue
 
-        logging.info(f"New Account {account} from sheet: {record}.")
+        # logging.info(f"New Account {account} from sheet: {record}.")
         # noinspection PyBroadException
         try:
             record = dict(record)
@@ -164,7 +164,7 @@ def remote_accounts(entries, options_map):
             datestr = record.pop('date', "2000-01-01") or "2000-01-01"
             y, m, d = datestr.split('-')
             open_date = datetime.date(year=int(y), month=int(m), day=int(d))
-            meta = dict((k, v) for (k, v) in record.items() if v)
+            meta = dict((k, str(v)) for (k, v) in record.items() if v)
             meta['lineno'] = 0
             meta['filename'] = ''
             entry = data.Open(
