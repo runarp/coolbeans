@@ -1,6 +1,10 @@
+import re
+import logging
 # beancount imports
 from beancount.core import data
 from coolbeans.utils import safe_plugin
+
+logger = logging.getLogger(__name__)
 
 
 __plugins__ = ['account_slug_plugin']
@@ -18,8 +22,16 @@ def account_slug(entries, context):
         if isinstance(entry, data.Open):
             slug = entry.meta.get(SLUG_OPEN_META_KEY, None)
             if slug:
-                slugs[slug.lower()] = entry.account
-                slugs[slug.replace('-', '')] = entry.account
+                multiple = re.split(r'[\s,]', slug)
+                for s in multiple:
+                    if not s:
+                        continue
+#                   if s.lower() in slugs:
+#                       logger.warn(f"Duplicate slug {s.lower()} for {entry.account}")
+#                   slugs[s.lower()] = entry.account
+#                   if s.lower() in slugs:
+#                       logger.warn(f"Duplicate slug {s.replace('-', '')} for {entry.account}")
+                    slugs[s.replace('-', '')] = entry.account
 
     return entries, []
 

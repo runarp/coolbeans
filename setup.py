@@ -165,6 +165,7 @@ setup(
         'dev': ['check-manifest'],
         'test': ['coverage', 'nose'],
         'sheets': ['gspread', 'oauth2client', 'dateparser'],
+        'xl': ['openpyxl']
     },
 
     # If there are data files included in your packages that need to be
@@ -194,6 +195,7 @@ setup(
         'console_scripts': [
             'cool-match=coolbeans.matcher:main',
             'cool-organizer=coolbeans.organizer:main',
+            'cool-file=coolbeans.apps.filing:main'
         ],
     },
 

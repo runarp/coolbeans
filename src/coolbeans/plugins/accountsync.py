@@ -1,6 +1,7 @@
 # stdlib imports
 import logging
 import pprint
+import re
 import typing
 import datetime
 import pathlib
@@ -158,9 +159,9 @@ def remote_accounts(entries, options_map):
         try:
             record = dict(record)
             record.pop('account')
-            currencies = record.pop('currencies', None)
+            currencies = record.pop('currencies', '')
             if currencies:
-                currencies = currencies.split(',')
+                currencies = re.split(r'\W+', currencies)
             datestr = record.pop('date', "2000-01-01") or "2000-01-01"
             y, m, d = datestr.split('-')
             open_date = datetime.date(year=int(y), month=int(m), day=int(d))
@@ -188,13 +189,14 @@ def remote_accounts(entries, options_map):
 
 
     # Write all the entries back to the sheet
-    append_to_sheet.sort(key=lambda x: x['account'])
-    header = sheet.row_values(1)
-    rows = []
-    for item in append_to_sheet:
-        row = [str(item.get(f, '')) for f in header]
-        rows.append(row)
-    sheet.update([header]+rows)
+    if False:
+        append_to_sheet.sort(key=lambda x: x['account'])
+        header = sheet.row_values(1)
+        rows = []
+        for item in append_to_sheet:
+            row = [str(item.get(f, '')) for f in header]
+            rows.append(row)
+        sheet.update([header]+rows)
 
     return entries, []
 

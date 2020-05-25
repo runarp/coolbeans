@@ -9,6 +9,27 @@ rows are the credit/debits to that account.
 Can be used as a plugin, which will write new entries (for reference)
 to a file, but also maintain a "live" view of the transactions.
 
+We support most of the sane columns on a sheet:
+    - date
+    - narration
+    - payee
+    - account
+    - amount
+    - currency
+    - tags
+    - links
+    - Anything else, if non-empty cell, gets added as a META
+
+Some things to look at are:
+    - Multi-currency Support
+    - Lot support?
+    - Other Directives: Note, Document, Balance?
+    - Smarter per-sheet caching of local results
+
+I strongly suggest using "Transfer" accounts for all asset movements between
+two accounts both of which are tracked via a Sheet.  This simplifies the
+"Matching" and allows each side to be reconciled independently.
+
 """
 
 
@@ -30,6 +51,7 @@ from coolbeans.plugins.accountsync import apply_coolbean_settings
 
 import gspread
 
+STRIP_SYMOLS = '₱$'
 DEFAULT_CURRENCY = "USD"
 logger = logging.getLogger(__name__)
 __plugins__ = ['apply_coolbean_settings', 'remote_entries_plugin']
@@ -66,7 +88,8 @@ def remote_entries(entries, options_map):
                 document_tab=entry.meta.get('document_tab', None),
                 reverse_amount=entry.meta.get('reverse', False),
                 default_currency=default_currency,
-                entry=entry
+                entry=entry,
+                entry_file=new_entries_path
             )
             remote_accounts[entry.account] = options
 
@@ -93,37 +116,47 @@ def remote_entries(entries, options_map):
 remote_entries_plugin = safe_plugin(remote_entries)
 
 ALIASES = {
-    'narration': ['description', 'notes', 'details', 'memo'],
-    'account': ['category']
+    'narration': ['description', 'notes', 'details', 'memo']
 }
 
 def clean_record(record: typing.Dict[str, str]):
+    """This is a bit of a hack.  But using get_all_records doesn't leave many
+    options"""
+
     new_record = {}
     for k, v in record.items():
         k = slugify.slugify(k.lower().strip())
         v = str(v)
 
+        # Combine multiple narration columns if needed:
         for field, names in ALIASES.items():
+            new_record.setdefault(field, '')
             if k in names:
-                k = field
+                # Add the value to Narration:
+                new_record[field] += ('. ' if new_record[field] else '') + v
+                k = None  # Clear this Key
                 break
 
+        # Really Ugly hack around embeded currency symbols.  Needs Cleanup
         if k == 'amount':
             v = v.replace(',', '')
+            for s in STRIP_SYMOLS:
+                v = v.replace(s, '')
             if v and not v[0].isdecimal() and not v[0]=='-':
                 v = v[1:]
                 # Pull currency?
 
+            # Decimal is fussy
             try:
                 v = decimal.Decimal(v)
             except decimal.InvalidOperation:
-                logger.error(f"Unable to convert {v} to Decimal in record {record}")
                 v = 0
 
         if k:
             new_record[k] = v
 
     return new_record
+
 
 def load_remote_account(
         connection: gspread.Client,
@@ -138,9 +171,6 @@ def load_remote_account(
         - document_tab -- the Tab name on the Doc
         - default_currency - the entry currency if None is provided
         - reverse_amount - if true, assume positive entries are credits
-
-    TODO: Multi-currency
-    TODO: Lot support
 
     """
     entries = []
@@ -164,14 +194,15 @@ def load_remote_account(
 
     records = sheet.get_all_records()
     import re
+    row = 0
+    # logger.info(f"Found {len(records)} entries.")
     for record in records:
-
-        # logger.info(f"Looking at {record}")
+        row += 1
+        record = clean_record(record)
         if 'date' not in record or not record['date']:
             continue
         if 'amount' not in record or not record['amount']:
             continue
-        record = clean_record(record)
 
         narration = record.pop('narration', None)
 
@@ -188,8 +219,9 @@ def load_remote_account(
         links = set(re.split(r'\W+', linkstr)) if linkstr else set()
 
         meta = {
-            'filename': '',
-            'lineno': 0
+            'filename': str(options['entry_file']),
+            'lineno': 0,
+            'document-sheet-row': f"{document_name}/{document_tab}/{row}"
         }
         amount = decimal.Decimal(record.pop('amount')) * m
         currency = record.pop('currency', default_currency)
@@ -231,4 +263,5 @@ def load_remote_account(
             logger.error(f"Error while parsing {record}", exc_info=exc)
             errors.append(str(exc))
 
+    logger.info(f"Loaded {len(entries)} entries for {account} from {document_name}.{document_tab}")
     return entries

@@ -31,11 +31,36 @@ def filing_handler(
     ):
 
     for folder in source_directories:
-        for file in folder.rglob():
+        for file in folder.rglob("*"):
             match = expand_file(file)
-
             if match is None:
                 continue
+
+            account = slugs.get(match.slug, None)
+            if not account:
+                account = slugs.get(match.slug.replace('-', ''), None)
+            if not account:
+                logger.info(f"Unable to find matching account for slug {match.slug}. [{match.file}]")
+                continue
+
+            sub_directory = account.replace(':', '/')
+            target_directory = destination.joinpath(sub_directory)
+
+            # Just incase
+            target_file = target_directory.joinpath(match.make_name)
+
+            if not dry_run:
+                target_directory.mkdir(parents=True, exist_ok=True)
+                if not target_file.exists():
+                    file.rename(target_file)
+                else:
+                    logger.warning(f"Skipping existing target {target_file}")
+            else:
+                if not (target_directory.exists() and target_directory.is_dir()):
+                    logger.info(f"DRY: mkdir {target_directory}")
+                if not target_file.exists():
+                    logger.info(f"DRY: mv {file} -> {target_file}")
+
 
 
 def configure_parser(parser):
@@ -61,12 +86,13 @@ def configure_parser(parser):
     parser.add_argument(
         dest='source_folders',
         metavar='SOURCE',
-        nargs='?',
+        nargs='+',
         type=pathlib.Path,
         help="Source folder(s) to scan for documents.",
         default=list()
     )
     return parser
+
 
 def main():
     parser = argparse.ArgumentParser("Filing App")
@@ -103,10 +129,18 @@ def main():
     logger.info(f"Read {len(entries)} entries.")
 
     if errors:
+        pprint.pprint(errors, stream=sys.stderr)
         # printer.print_errors(errors, sys.stderr)
         sys.exit(1)
 
     slugs = context['slugs']
+
+    filing_handler(
+        source_directories=args.source_folders,
+        destination=args.destination_folder,
+        slugs=slugs,
+        dry_run=True
+    )
 
 if __name__ == "__main__":
     main()
