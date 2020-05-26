@@ -493,7 +493,7 @@ def main():
 
     from beancount import loader
 
-    # Load the beanfile
+    # Load the bean_file
     entries, errors, options_map = loader.load_file(args.existing)
 
     if errors:

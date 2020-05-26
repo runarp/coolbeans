@@ -1,12 +1,15 @@
 import typing
 import logging
 import importlib
+import pprint
 
 logger = logging.getLogger(__name__)
 
 def safe_plugin(func: typing.Callable) -> typing.Callable:
     # We might want to pull the logger out of the func module?
+    DEBUG_CONTEXT = {}
     try:
+        DEBUG_CONTEXT = getattr(importlib.import_module(func.__module__), 'DEBUG_CONTEXT', {})
         log = importlib.import_module(func.__module__).logger
     except AttributeError:
         log = logger
@@ -16,7 +19,7 @@ def safe_plugin(func: typing.Callable) -> typing.Callable:
         try:
             return func(*args)
         except Exception as e:
-            log.exception(f"{func.__name__}")
+            log.exception(f"{func.__name__} {pprint.pformat(DEBUG_CONTEXT)}")
             raise
 
     return do_work

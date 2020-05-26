@@ -40,7 +40,7 @@ def filing_handler(
             if not account:
                 account = slugs.get(match.slug.replace('-', ''), None)
             if not account:
-                logger.info(f"Unable to find matching account for slug {match.slug}. [{match.file}]")
+                logger.info(f"Unable to find matching account for slug {match.slug}. [{match.file}]\n{pprint.pformat(slugs)}")
                 continue
 
             sub_directory = account.replace(':', '/')
@@ -48,18 +48,31 @@ def filing_handler(
 
             # Just incase
             target_file = target_directory.joinpath(match.make_name)
+            count = 0
+
+            if target_file == file:
+                # noop
+                continue
+
+            # Rename duplicate files
+            possible_target:pathlib.Path = target_file
+            sep = '.'
+            while possible_target.exists():
+                count += 1
+                possible_target = target_file.parent.joinpath(
+                    target_file.stem
+                    + sep + str(count)
+                    + target_file.suffix
+                )
 
             if not dry_run:
                 target_directory.mkdir(parents=True, exist_ok=True)
-                if not target_file.exists():
-                    file.rename(target_file)
-                else:
-                    logger.warning(f"Skipping existing target {target_file}")
+
+                file.rename(possible_target)
             else:
                 if not (target_directory.exists() and target_directory.is_dir()):
                     logger.info(f"DRY: mkdir {target_directory}")
-                if not target_file.exists():
-                    logger.info(f"DRY: mv {file} -> {target_file}")
+                logger.info(f"DRY: mv {file} -> {possible_target}")
 
 
 
@@ -75,6 +88,11 @@ def configure_parser(parser):
     )
     parser.add_argument(
         '-v', '--debug',
+        action='store_true',
+        default=False
+    )
+    parser.add_argument(
+        '-n', '--dry-run',
         action='store_true',
         default=False
     )
@@ -130,7 +148,6 @@ def main():
 
     if errors:
         pprint.pprint(errors, stream=sys.stderr)
-        # printer.print_errors(errors, sys.stderr)
         sys.exit(1)
 
     slugs = context['slugs']
@@ -139,7 +156,7 @@ def main():
         source_directories=args.source_folders,
         destination=args.destination_folder,
         slugs=slugs,
-        dry_run=True
+        dry_run=args.dry_run,
     )
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ def account_slug(entries, context):
         if isinstance(entry, data.Open):
             slug = entry.meta.get(SLUG_OPEN_META_KEY, None)
             if slug:
+                slug = slug.lower()
                 multiple = re.split(r'[\s,]', slug)
                 for s in multiple:
                     if not s:

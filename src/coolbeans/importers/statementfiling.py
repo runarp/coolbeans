@@ -31,17 +31,17 @@ logger = logging.getLogger(__name__)
 
 class Importer(importer.ImporterProtocol):
 
-    def __init__(self, beanfile: str=None):
-        if beanfile is None:
-            beanfile = os.environ.get(BEAN_FILE_ENV, None)
+    def __init__(self, bean_file: str=None):
+        if bean_file is None:
+            bean_file = os.environ.get(BEAN_FILE_ENV, None)
 
-        assert pathlib.Path(beanfile).exists(), f"Unable to find bean file {beanfile}."
+        assert pathlib.Path(bean_file).exists(), f"Unable to find bean file {beanfile}."
 
-        self._auto_configure(beanfile)
+        self._auto_configure(bean_file)
 
-    def _auto_configure(self, beanfile: str):
+    def _auto_configure(self, bean_file: str):
         """Given a beancount file, extract any Open tag 'slug' meta data."""
-        entries, errors, context = load_file(beanfile, log_errors=sys.stderr)
+        entries, errors, context = load_file(bean_file, log_errors=sys.stderr)
         assert 'slugs' in context, "Requires 'coolbeans.plugins.slugs'"
         self.slugs = context['slugs']
 

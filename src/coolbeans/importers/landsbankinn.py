@@ -14,11 +14,14 @@ import decimal
 import typing
 import dataclasses
 import logging
+import pprint
 
 import openpyxl
 
 from beancount.ingest import importer, cache
+from coolbeans.tools.loader import load_file, Meta
 from beancount.core import data, amount, account
+
 
 
 logger = logging.getLogger(__name__)
@@ -58,10 +61,16 @@ class PossibleRow:
 
     @classmethod
     def from_row(cls, row: list, map: dict) -> 'PossibleRow':
-        parameters = dict(meta={})
+        parameters = dict(meta=Meta())
         for field, index in map.items():
             cell = row[index]
             value = cell.value
+            if field == 'date':
+                value = datetime.date(
+                    year=value.year,
+                    month=value.month,
+                    day=value.day
+                )
 
             if field == 'amount':
                 value = decimal.Decimal(value).quantize(decimal.Decimal("0.01"))
@@ -84,32 +93,53 @@ def map_header(row:list, value_map: dict):
 
 class Importer(importer.ImporterProtocol):
 
+    accounts = None
+    possible_accounts:dict = None
+    header:dict = None
+    bean_file:str = ""
+
     def __init__(
             self,
-            bean_file
+            accounts: typing.Dict[str, str],
+            bean_file: str=None,
     ):
         """We need the account.
         next is to match on the meta tag and check the second TAB of the Excel sheet for Account number
 
         """
-        entries, errors, context = loader.load
-
         self.accounts = accounts
-        self.entries = entries
-
-        if entries:
-            self._auto_configure(entries)
-
-#       self.root_account = accounts['root']
-#       self.default_transfer = accounts['default-transfer']
-#       self.default_expense = accounts['default-expense']
-
-    def _auto_configure(self, entries: data.Entries):
+        self.bean_file = bean_file
         self.possible_accounts = {}
+        self.header = {}
+
+        if bean_file:
+            self._auto_configure(bean_file)
+
+    def _auto_configure(self, bean_file):
+        self.possible_accounts = {}
+        entries, errors, context = load_file(bean_file)
         for entry in entries:
             if not isinstance(entry, data.Open):
                 continue
             acct = entry.meta.get('account_number', '').replace('-', '')
+            self.possible_accounts[acct] = entry.account
+
+    def get_root(self):
+        root = self.accounts.get('root', None)
+        if root:
+            return root
+
+        if self.possible_accounts and self.header:
+            assert 'account_number' in self.header, f"XXX {self.header}"
+            statement_account = str(self.header.get('account_number'))
+            acct = self.possible_accounts.get(
+                statement_account, None)
+            if acct:
+                logger.info(f"Auto-Resolved account {statement_account}  to {acct}")
+                return acct
+            else:
+                logger.info(f"{pprint.pformat(self.possible_accounts)}")
+                logger.info(f"statement_account = {statement_account}")
 
 
     def name(self):
@@ -120,39 +150,45 @@ class Importer(importer.ImporterProtocol):
             name = file.name
             self._read_file(name)
         except Exception as exc:
-            logger.info("", exc_info=exc)
+#           logger.info("", exc_info=exc)
             return False
         return True
 
     def file_account(self, file):
         name = file.name
-        return f"{self.root_account}"
+        return f"{self.get_root()}"
 
     def file_date(self, file: cache._FileMemo):
         name = file.name
         entries, context = self._read_file(name)
         if entries:
-            return entries[-1].date
+            return entries[0].date
 
     def file_name(self, file):
         name = file.name
         entries, context = self._read_file(name)
 
         if entries:
-            first_entry = entries[0].date
+            first_entry = entries[-1].date
 
-        return f"s{first_entry.strftime('%Y-%m-%d')}-{context['account_number']}.export.xlsx"
+        return f"s{first_entry.strftime('%Y-%m-%d')}.{context['account_number']}.statement.xlsx"
 
     def extract(self, file: cache._FileMemo, existing_entries=None) -> data.Entries:
         """Given a File, let's extract the records"""
 
         name = file.name
         possible, context = self._read_file(name)
+        root_account = self.get_root()
+        if not root_account:
+            logger.error(f"Unable to find an account {context}")
+            return []
+
+        new_entries = []
 
         for entry in possible:
             target_account = self.accounts['default-transfer']
 
-            yield data.Transaction(
+            new_entries.append(data.Transaction(
                 date=entry.date,
                 narration=entry.narration,
                 payee=entry.payee,
@@ -162,7 +198,7 @@ class Importer(importer.ImporterProtocol):
                 flag="!",
                 postings=[
                     data.Posting(
-                        account=self.root_account,
+                        account=root_account,
                         units=data.Amount(entry.amount, entry.currency),
                         flag="*",
                         cost=None,
@@ -178,7 +214,8 @@ class Importer(importer.ImporterProtocol):
                         meta=None
                     )
                 ]
-            )
+            ))
+        return new_entries
 
 
     def pull_info(self, wb) -> dict:
@@ -207,7 +244,6 @@ class Importer(importer.ImporterProtocol):
         for row in sheet.rows:
             if not col_map:
                 col_map = map_header(row, MAP_BY_VALUE)
-                print(f"{col_map}")
             else:
                 record = PossibleRow.from_row(row, col_map)
                 if record.amount:
@@ -215,7 +251,7 @@ class Importer(importer.ImporterProtocol):
 
         context = self.pull_info(wb)
         context['header'] = col_map
-
+        self.header = context
         return data_rows, context
 
 if __name__ == "__main__":

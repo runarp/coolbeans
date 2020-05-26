@@ -157,7 +157,7 @@ class MatchRule(DirectiveAttribute):
                 return None
 
         # Now we don't care if it's a posting or object
-        if self.parameter == 'meta':
+        if self.parameter == 'meta' and self.meta_key in obj.meta:
             return obj.meta[self.meta_key]
 
         return str(getattr(obj, self.parameter))

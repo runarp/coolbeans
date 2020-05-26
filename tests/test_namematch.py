@@ -64,7 +64,8 @@ class TestMatch(unittest.TestCase):
                 slug="nbi-1857",
                 ext="csv",
                 file=file,
-                document=None
+                document=None,
+                seq=0
             )
         )
 
@@ -80,6 +81,24 @@ class TestMatch(unittest.TestCase):
                 slug="nbi-1857",
                 ext="csv",
                 file=file,
-                document='export'
+                document='export',
+                seq=0
+            )
+        )
+
+    def test_since_date_seq(self):
+        file = pathlib.Path("2018-09-27.s2018-09-01.nbi-1857.export.2.csv")
+        result = expand_file(file)
+        self.assertEqual(
+            result,
+            FileDetails(
+                file_name=file.name,
+                date=datetime.datetime(year=2018, month=9, day=27),
+                from_date=datetime.datetime(year=2018, month=9, day=1),
+                slug="nbi-1857",
+                ext="csv",
+                file=file,
+                document='export',
+                seq=2
             )
         )

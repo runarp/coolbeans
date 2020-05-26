@@ -33,7 +33,7 @@ def apply_coolbean_settings(entries, options_map):
 
     return entries, []
 
-
+DEBUG_CONTEXT = {}
 def remote_accounts(entries, options_map):
     """* Remote Accounts
 
@@ -95,7 +95,10 @@ def remote_accounts(entries, options_map):
     sheet = safe_open_sheet(workbook, sheet_name)
 
     possible_accounts = load_accounts_from_sheet(sheet)
-    sheet_by_name = dict((a['account'], a) for a in possible_accounts)
+    DEBUG_CONTEXT['possible_accounts'] = possible_accounts
+    sheet_by_name = dict(
+        (a['account'], a) for a in possible_accounts
+    )
     last_row = len(possible_accounts) + 1
 
     append_to_sheet = []
@@ -104,6 +107,7 @@ def remote_accounts(entries, options_map):
     # Some Account Trees Should be Hidden, use a 'hidden': 1 Meta
     hidden_prefixes = set()
     for entry in entries:
+        DEBUG_CONTEXT['entry'] = entry
         if not isinstance(entry, data.Open):
             continue
         hidden = entry.meta.get('hidden', 0)
@@ -112,6 +116,7 @@ def remote_accounts(entries, options_map):
 
     # Make a List of Local Entries, not on the Sheet
     for entry in entries:
+        DEBUG_CONTEXT['entry'] = entry
         if not isinstance(entry, data.Open):
             continue
         match = False
@@ -140,6 +145,7 @@ def remote_accounts(entries, options_map):
     # Make a List of Entries on the Sheet but Not in our Books
     new_entries = []
     for account, record in sheet_by_name.items():
+        DEBUG_CONTEXT['current'] = (account, record)
         if account in open_by_account:
             # This _might_ be a modified entry, in which case we should use
             # Meta Attributes set in the Sheet!
@@ -202,5 +208,9 @@ def remote_accounts(entries, options_map):
 
 remote_accounts_plugin = safe_plugin(remote_accounts)
 
-def load_accounts_from_sheet(sheet: gspread.Worksheet):
-    return sheet.get_all_records()
+def load_accounts_from_sheet(sheet: gspread.Worksheet) -> typing.List[list]:
+    result = []
+    for record in sheet.get_all_records():
+        if record.get('date', None) and record.get('account', None):
+            result.append(record)
+    return result
