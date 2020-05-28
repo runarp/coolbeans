@@ -58,6 +58,7 @@ def filing_handler(
             possible_target:pathlib.Path = target_file
             sep = '.'
             while possible_target.exists():
+                print(f"Found matching file {possible_target}")
                 count += 1
                 possible_target = target_file.parent.joinpath(
                     target_file.stem
@@ -66,13 +67,17 @@ def filing_handler(
                 )
 
             if not dry_run:
+                if not (target_directory.exists() and target_directory.is_dir()):
+                    print(f"mkdir {target_directory}")
                 target_directory.mkdir(parents=True, exist_ok=True)
-
                 file.rename(possible_target)
+                print(f"MOVED {file} -> {possible_target}")
             else:
                 if not (target_directory.exists() and target_directory.is_dir()):
                     logger.info(f"DRY: mkdir {target_directory}")
+                    print(f"DRY: mkdir {target_directory}")
                 logger.info(f"DRY: mv {file} -> {possible_target}")
+                print(f"mv {file} -> {possible_target}")
 
 
 
@@ -126,9 +131,11 @@ def main():
         assert isinstance(folder, pathlib.Path)
         if not folder.is_dir():
             print(f"Invalid source folder {folder}.")
+            sys.exit(1)
 
     if not args.destination_folder.is_dir():
         print(f"Invalid destination folder {args.destination_folder}.")
+        sys.exit(1)
 
     if args.debug:
         logging.basicConfig(
@@ -145,10 +152,6 @@ def main():
         log_timings=logger.info
     )
     logger.info(f"Read {len(entries)} entries.")
-
-    if errors:
-        pprint.pprint(errors, stream=sys.stderr)
-        sys.exit(1)
 
     slugs = context['slugs']
 

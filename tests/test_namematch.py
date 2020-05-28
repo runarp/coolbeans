@@ -102,3 +102,21 @@ class TestMatch(unittest.TestCase):
                 seq=2
             )
         )
+
+    def test_with_match_seq(self):
+        file = pathlib.Path("ParaisoExpenses/Utility Statements/MERALCO/Paraiso/2020-01-20.paraiso-meralco.statment.pdf")
+        result = expand_file(file)
+        self.assertEqual(
+            result,
+            FileDetails(
+                file_name=file.name,
+                date=datetime.datetime(year=2020, month=1, day=20),
+                from_date=None,
+                slug="paraiso-meralco",
+                ext="pdf",
+                file=file,
+                document='statement',
+                seq=0
+            )
+        )
+        self.assertEqual(file.name, result.make_name)

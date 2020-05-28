@@ -67,7 +67,6 @@ class Format:
         return self.NamedTuple(*row)
 
 
-
 class Entry:
     """Some Helpers to Parse/Format the entries coming from d2.
 

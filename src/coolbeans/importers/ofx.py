@@ -2,7 +2,7 @@ import datetime
 from datetime import timedelta
 import logging
 
-DEBUG = False
+DEBUG = True
 
 # logging.basicConfig(level="DEBUG")
 from beancount.ingest import importer, cache
@@ -17,6 +17,11 @@ from coolbeans import matcher
 
 
 logger = logging.getLogger(__name__)
+
+
+if DEBUG:
+    import sys
+    logging.basicConfig(stream=sys.stdout)
 
 class Importer(importer.ImporterProtocol):
 
@@ -40,6 +45,7 @@ class Importer(importer.ImporterProtocol):
                 'payment'
                 'ofx-account-id'
         """
+        pass
 
     def _parse_statement(self, file: FileMemo) -> CCSTMTRS:
         """
@@ -192,7 +198,7 @@ class Importer(importer.ImporterProtocol):
 
         result = []
         for tx in statement.transactions:
-            assert isinstance(tx, STMTTRN)
+            assert isinstance(tx, STMTTRN), repr(tx)
             if tx.fitid in entries_by_id:
                 continue
 

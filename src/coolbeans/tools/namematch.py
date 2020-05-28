@@ -34,13 +34,14 @@ class FileDetails:
     @property
     def make_name(self):
         since = document = ''
-        seq = 0
+        seq = ''
 
         if self.from_date:
             since = f".s{self.from_date.strftime('%Y-%m-%d')}"
         if self.document:
             document = f".{self.document}"
-        if self.seq:
+
+        if self.seq and self.seq != '0':
             seq = f".{self.seq}"
 
         return f"{self.date.strftime('%Y-%m-%d')}{since}.{self.slug}{document}{seq}.{self.ext}"
