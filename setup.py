@@ -151,6 +151,7 @@ setup(
         'beancount',
         'pyyaml',
         'python-slugify'
+        'coloredlogs'
     ],  # Optional
 
     # List additional groups of dependencies here (e.g. development
@@ -195,7 +196,9 @@ setup(
         'console_scripts': [
             'cool-match=coolbeans.matcher:main',
             'cool-organizer=coolbeans.organizer:main',
-            'cool-file=coolbeans.apps.filing:main'
+            'cool-file=coolbeans.apps.filing:main',
+            'cool-web=coolbeans.apps.webrunner:main',
+            'cool-sheet-fetch=coolbeans.apps.sheetfetch:main',
         ],
     },
 

@@ -1,11 +1,19 @@
 import datetime
 from datetime import timedelta
 import logging
+import dataclasses
+import decimal
+import typing
+import sys
+
+import slugify
 
 from ibflex import client, parser, Types, FlexQueryResponse, FlexStatement
 
 from beancount.ingest import importer, cache
 from beancount.core import data, amount, account
+from beancount.core.number import MISSING
+from beancount.core.amount import Amount
 
 
 # create a logger
@@ -15,6 +23,48 @@ logger = logging.getLogger(__name__)
 def parse_file(file_name):
     """Wrapper callback for file cache"""
     return parser.parse(file_name)
+
+
+EMPTY_COST_SPEC = data.CostSpec(
+    number_per=MISSING,
+    number_total=None,
+    currency=MISSING,
+    date=None,
+    label=None,
+    merge=False
+)
+
+
+@dataclasses.dataclass
+class CombinedTrades:
+    tradeDate: datetime.datetime
+    ibOrderID: str
+    tradePrice: decimal.Decimal
+    exchange: str
+    multiplier: int
+    ibCommission: decimal.Decimal
+    symbol: str
+    safe_symbol: str
+    buySell: str
+    currency: str
+    quantity: decimal.Decimal
+    ibCommissionCurrency: str
+    securityID: str
+    openCloseIndicator: str
+
+    @staticmethod
+    def trade_key(trade):
+        return f"{trade.openCloseIndicator}:{trade.tradeDate.strftime('%Y-%m-%d')}:{trade.ibOrderID}"
+
+    def add_trade(self, quantity, price, comission: decimal.Decimal):
+        self.ibCommission += comission
+
+        current_quant = self.quantity
+        current_price = self.tradePrice
+
+        self.quantity += quantity
+        # Use Quantity weighted average Price
+        self.tradePrice = ((current_quant*current_price) + (quantity*price)) / self.quantity
 
 
 class Importer(importer.ImporterProtocol):
@@ -121,11 +171,13 @@ class Importer(importer.ImporterProtocol):
         return statement
 
     def clean_symbol(self, ib_symbol):
-        symbol = ib_symbol.replace(' ', '').replace('_', '').replace('.', '')
+        symbol = slugify.slugify(ib_symbol)
+        #  symbol = ib_symbol.replace(' ', '').replace('_', '').replace('.', '')
         if symbol[0].isdigit():
-            return "X" + symbol
-        else:
-            return symbol
+            symbol = "X" + symbol
+        symbol = symbol.upper()
+        symbol = symbol.replace('-', '')
+        return symbol
 
     def account_for_symbol(self, statement, ib_symbol):
         symbol = self.clean_symbol(ib_symbol)
@@ -150,7 +202,9 @@ class Importer(importer.ImporterProtocol):
         trades = self.extract_trades(statement, existing_entries)
         opens = self.extract_new_accounts(statement, existing_entries)
 
-        return commodities + prices + trades + opens
+        return trades
+
+        # return commodities + prices + trades + opens
 
     def extract_cash_transaction(self, statement: FlexStatement, existing_entries:list=None):
         """
@@ -197,24 +251,54 @@ class Importer(importer.ImporterProtocol):
         """
         fees_account = self.accounts['fees']
 
-        match_key = 'match-key'
+        match_key = 'id'
 
         existing_by_key = self.find_existing(existing_entries, match_key)
 
-        result = []
-        for trade in statement.Trades:
+        by_order:typing.Dict[str, CombinedTrades] = {}
 
-            if trade.extExecID in existing_by_key:
+        for trade in statement.Trades:
+            key = CombinedTrades.trade_key(trade)
+            assert key.strip(), f"Invalid Key {len(key)}"
+            if not trade.openCloseIndicator:
+                continue
+            if key in by_order:
+                combined = by_order[key]
+                combined.add_trade(trade.quantity, trade.tradePrice, trade.ibCommission)
+            else:
+                combined = CombinedTrades(
+                    ibOrderID=trade.ibOrderID,
+                    tradeDate=trade.tradeDate,
+                    tradePrice=trade.tradePrice,
+                    exchange=trade.exchange,
+                    multiplier=trade.multiplier,
+                    ibCommission=trade.ibCommission,
+                    symbol=trade.symbol,
+                    currency=trade.currency,
+                    safe_symbol=self.clean_symbol(trade.symbol),
+                    buySell=trade.buySell,
+                    quantity=trade.quantity,
+                    securityID=trade.securityID,
+                    ibCommissionCurrency=trade.ibCommissionCurrency,
+                    openCloseIndicator=trade.openCloseIndicator.name
+                )
+                by_order[key] = combined
+
+        result = []
+        for trade in by_order.values():
+
+            key = CombinedTrades.trade_key(trade)
+            if key in existing_by_key:
                 continue
 
             meta = {
                 'lineno': 0,
                 'filename': '',
-                match_key: trade.extExecID,
-                'order-id': trade.ibOrderID,
+                match_key: key,
+                'order_id': trade.ibOrderID,
                 'exchange': trade.exchange,
-                'multiplier': trade.multiplier,
-                'commission': trade.ibCommission,
+#               'multiplier': str(trade.multiplier),
+#               'commission': trade.ibCommission,
             }
 
             # TODO Make this a parameter
@@ -242,7 +326,6 @@ class Importer(importer.ImporterProtocol):
 
             # This is how much USD it cost us
             # cost_amount = data.Cost(number=trade.netCash, currency=trade.currency, date=trade.tradeDate, label=f"xxx")
-
             cash_amount = amount.Amount(-trade.quantity * trade.multiplier * trade.tradePrice, trade.currency)
             unit_amount = amount.Amount( trade.quantity * trade.multiplier, safe_symbol)
 
@@ -260,7 +343,7 @@ class Importer(importer.ImporterProtocol):
                     data.Posting(
                         account=comm_account,
                         units=unit_amount,
-                        cost=None, #cost_amount, # cost=(Cost, CostSpec, None),
+                        cost=EMPTY_COST_SPEC, #cost_amount, # cost=(Cost, CostSpec, None),
                         price=post_price,
                         flag=self.FLAG,
                         meta={}
@@ -274,7 +357,6 @@ class Importer(importer.ImporterProtocol):
                         flag=self.FLAG,
                         meta={}
                     ),
-
                     # Total Fees
                     data.Posting(
                         account=fees_cost_account,
@@ -294,6 +376,14 @@ class Importer(importer.ImporterProtocol):
                    )
                 ]
             )
+            if trade.openCloseIndicator == "CLOSE":
+                # This is a reduction in position, add the Income Account:
+                data.create_simple_posting(
+                    entry=txn,
+                    account=self.accounts.get('income', 'Income:Trading:IB'),
+                    number=None,
+                    currency=None
+                )
             result.append(txn)
 
         return result
@@ -421,3 +511,7 @@ class Importer(importer.ImporterProtocol):
             results.append(commodity)
 
         return results
+
+
+if __name__ == "__main__":
+    CONFIG = []

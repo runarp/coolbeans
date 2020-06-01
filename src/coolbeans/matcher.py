@@ -113,7 +113,7 @@ def match_directives(entries, options_map, *args):
 
             # Read the YAML file
             with file.open("r") as stream:
-                new_rules = yaml.load(stream, Loader=yaml.FullLoader)
+                new_rules = yaml.full_load(stream)
 
             for rule in new_rules:
                 rules.append(

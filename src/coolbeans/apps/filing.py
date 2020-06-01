@@ -17,10 +17,10 @@ from beancount.loader import load_file
 from beancount.parser import printer
 
 from coolbeans.tools.namematch import expand_file
+from coolbeans.apps import BEAN_FILE_ENV
 
 
 logger = logging.getLogger(__name__)
-BEAN_FILE_ENV = 'BEAN_FILE'
 
 
 def filing_handler(
