@@ -9,7 +9,6 @@ If there's a meta['slug'] on any account directive that lines up
 with this account, we will identify the file.
 
 """
-import re
 import datetime
 import logging
 import pathlib
@@ -20,8 +19,6 @@ import sys
 from beancount.ingest.cache import _FileMemo as FileMemo
 from beancount.ingest import importer
 from beancount.loader import load_file
-from beancount.parser import parser
-from beancount.core import data
 from coolbeans.tools.namematch import expand_file
 
 BEAN_FILE_ENV = 'BEAN_FILE'
@@ -35,7 +32,7 @@ class Importer(importer.ImporterProtocol):
         if bean_file is None:
             bean_file = os.environ.get(BEAN_FILE_ENV, None)
 
-        assert pathlib.Path(bean_file).exists(), f"Unable to find bean file {beanfile}."
+        assert pathlib.Path(bean_file).exists(), f"Unable to find bean file {bean_file}."
 
         self._auto_configure(bean_file)
 

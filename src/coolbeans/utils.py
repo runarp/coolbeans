@@ -54,6 +54,7 @@ def safe_plugin(func: typing.Callable) -> typing.Callable:
 
     return do_work
 
+
 def get_setting(key, settings):
     """Returns the first item from the setting list if only one item"""
     if key in settings:

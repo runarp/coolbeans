@@ -150,7 +150,7 @@ setup(
         'ofxtools',
         'beancount',
         'pyyaml',
-        'python-slugify'
+        'python-slugify',
         'coloredlogs'
     ],  # Optional
 
@@ -166,7 +166,8 @@ setup(
         'dev': ['check-manifest'],
         'test': ['coverage', 'nose'],
         'sheets': ['gspread', 'oauth2client', 'dateparser'],
-        'xl': ['openpyxl']
+        'xl': ['openpyxl'],
+        'web': ['fava']
     },
 
     # If there are data files included in your packages that need to be

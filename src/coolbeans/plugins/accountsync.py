@@ -141,7 +141,7 @@ def remote_accounts(entries, options_map):
                 'date': entry.date.strftime("%Y-%m-%d")
             }
             append_to_sheet.append(new_account)
-
+    DEBUG_CONTEXT['open'] = open_by_account
     # Make a List of Entries on the Sheet but Not in our Books
     new_entries = []
     for account, record in sheet_by_name.items():
@@ -194,23 +194,29 @@ def remote_accounts(entries, options_map):
             logger.info(f"Wrote {len(new_entries)} new account(s) to {new_accounts_path}.")
 
 
-    # Write all the entries back to the sheet
-    if False:
-        append_to_sheet.sort(key=lambda x: x['account'])
-        header = sheet.row_values(1)
-        rows = []
-        for item in append_to_sheet:
-            row = [str(item.get(f, '')) for f in header]
-            rows.append(row)
-        sheet.update([header]+rows)
+    # Write all the entries back to the end of the sheet
+    append_to_sheet.sort(key=lambda x: x['account'])
+    header = sheet.row_values(1)
+    rows = []
+    for item in append_to_sheet:
+        row = [str(item.get(f, '')) for f in header]
+        rows.append(row)
+    new_sheet = safe_open_sheet(workbook, "Accounts (Missing)")
+    new_sheet.update([header]+rows)
+    logger.debug(f"{pprint.pformat(DEBUG_CONTEXT)}")
 
     return entries, []
 
+
 remote_accounts_plugin = safe_plugin(remote_accounts)
+
 
 def load_accounts_from_sheet(sheet: gspread.Worksheet) -> typing.List[list]:
     result = []
     for record in sheet.get_all_records():
-        if record.get('date', None) and record.get('account', None):
+        cols = [k.lower() for k in record.keys()]
+        if 'date' in cols and 'account' in cols:
             result.append(record)
+        else:
+            logger.info(f"Skipping {record}")
     return result

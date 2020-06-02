@@ -12,11 +12,13 @@ In general, year files always need to be round-tripable, this allows for clean "
 transactions, progmatic balancing/matching of transactions.
 
 """
+import typing
 import logging
 import sys
 import pathlib
 import datetime
 import re
+import dateparser
 
 # beancount imports
 from beancount.core import data, account
@@ -36,12 +38,14 @@ class BeanOrganizer:
 
     def __init__(
             self,
-            year,
-            merge_file,
-            bean_file,
-            stage_files
+            between:typing.Tuple[datetime.date, datetime.date],
+            merge_file:pathlib.Path,
+            bean_file:pathlib.Path,
+            stage_files:list,
+            filter_account:str=None
     ):
-        self.duplicates = {}
+        from_date, through_date = between
+        self.duplicates = set()
         self.entries = []
         self.merge_file = merge_file
 
@@ -57,27 +61,35 @@ class BeanOrganizer:
             source_files.append(file_path)
             self.add_file(file_path)
 
-        # TODO make a time-period range
-        self.year = year
-
-        from_date = datetime.date(year=year, month=1, day=1)
-        until_date = datetime.date(year=year, month=12, day=31)
-
         # In place Filter
-        self.entries = self.filter_entries(self.entries, source_files, from_date, until_date)
+        self.entries = self.filter_entries(
+            self.entries,
+            source_files,
+            from_date,
+            through_date,
+            filter_account=filter_account
+        )
 
-    def filter_entries(self, entries, valid_files, date_start, date_end):
+    def filter_entries(self, entries, valid_files, date_start, date_end, filter_account=None):
         result = []
         for entry in entries:
             if entry.meta.get('filename', '') not in valid_files:
-                # print(f"{entry.meta.get('filename', '')} not in {valid_files}")
                 continue
             if entry.date < date_start or entry.date > date_end:
                 continue
+
+            if filter_account:
+                found = False
+                for posting in entry.postings:
+                    if posting.account == filter_account:
+                        found = True
+                        break
+                if not found:
+                    continue
+
             result.append(entry)
         logging.info(f"Filtered from {len(entries)} to {len(result)} based on {valid_files}.")
         return result
-
 
     def load_beanfile(self, file_name, stop_on_error=False):
         entries, errors, context = load_file(file_name)
@@ -237,17 +249,48 @@ def main():
     import argparse
     parser = argparse.ArgumentParser("Organizer")
     parser.add_argument("-e", "--existing", required=True, dest="bean_file")
-    parser.add_argument("-y", "--year", default=2020, type=int)
-    parser.add_argument("-m", "--merge-file", default=None)
-    parser.add_argument("stage_file", nargs='*')
+
+    parser.add_argument(
+        "-f", "--from-date",
+        default="1996-01-01",
+        type=str,
+        help="date from which to inject"
+    )
+    parser.add_argument(
+        "-t", "--through-date",
+        default=datetime.datetime.today().strftime("%Y-%m-%d"),
+        type=str,
+        help="date until which to inject"
+    )
+    parser.add_argument(
+        "--account",
+        default="",
+        type=str,
+        help="Filter Account"
+    )
+    parser.add_argument(
+        "-m", "--merge-file",
+        default=None,
+        help="The bean file to sort entries into."
+    )
+    parser.add_argument(
+        "stage_file",
+        nargs='*',
+        help="Source files to load entries from."
+    )
     args = parser.parse_args()
 
     # We "merge" into this file.  Entries not originating from this file are ignored
     merge_file = pathlib.Path(args.merge_file)
     assert merge_file.exists(), f"Unable to find {merge_file.absolute()}"
 
+    pd:datetime.datetime = dateparser.parse(args.from_date)
+    from_date = datetime.date(year=pd.year, month=pd.month, day=pd.day)
+    pd:datetime.datetime = dateparser.parse(args.through_date)
+    through_date = datetime.date(year=pd.year, month=pd.month, day=pd.day)
+
     organizer = BeanOrganizer(
-        args.year,
+        between=(from_date, through_date),
         merge_file=merge_file.absolute(),
         bean_file=args.bean_file,
         stage_files=args.stage_file
@@ -257,5 +300,6 @@ def main():
     organizer.save_entries()
 
 if __name__ == "__main__":
-    logging.basicConfig(sys.stderr)
+    import sys
+    logging.basicConfig(stream=sys.stderr)
     main()

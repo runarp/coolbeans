@@ -25,7 +25,6 @@ import slugify
 logger = logging.getLogger(__name__)
 
 
-
 def configure_parser(parser):
 
     parser.add_argument(
@@ -70,12 +69,14 @@ def configure_parser(parser):
         help=f"Beancount file to read the Open slugs. {'Default is '+ default_file if default_file else ''}"
     )
 
+
 def save_sheet(records: list, file_name: str, **header):
     # Now add the records
     header['records'] = records
 
     with pathlib.Path(file_name).open("w") as stream:
         yaml.dump(header, stream=stream)
+
 
 def main():
     parser = argparse.ArgumentParser()

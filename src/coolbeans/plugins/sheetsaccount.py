@@ -30,6 +30,7 @@ I strongly suggest using "Transfer" accounts for all asset movements between
 two accounts both of which are tracked via a Sheet.  This simplifies the
 "Matching" and allows each side to be reconciled independently.
 
+TODO: Default Account when account column is blank?
 """
 
 
@@ -56,6 +57,26 @@ DEFAULT_CURRENCY = "USD"
 logger = logging.getLogger(__name__)
 __plugins__ = ['apply_coolbean_settings', 'remote_entries_plugin']
 
+def coolbean_sheets(entries, context):
+    """Given a set of entries, pull out any slugs and add them to the context"""
+    settings = context.setdefault('coolbean-accounts', {})
+
+    # Pull out any 'slug' meta data
+    for entry in entries:
+        if isinstance(entry, data.Open):
+
+            document = entry.meta.get('document_name', None)
+            tab = entry.meta.get('document_tab', None)
+            slug = entry.meta.get('slug', None)
+            if document and tab and slug:
+                settings[slug] = {
+                    'account': entry.account,
+                    'document': document,
+                    'tab': tab,
+                    'currencies': entry.currencies
+                }
+
+    return entries, []
 
 def remote_entries(entries, options_map):
     """
@@ -92,7 +113,7 @@ def remote_entries(entries, options_map):
                 entry_file=new_entries_path
             )
             remote_accounts[entry.account] = options
-
+    logging.info(f"Collected accounts for checking: {pprint.pformat(remote_accounts)}")
     new_entries = []
     for account, options in remote_accounts.items():
         try:
@@ -186,10 +207,13 @@ def load_remote_account(
     m = -1 if reverse_amount else 1
     logger.info(f"Attempting to download entries for {account} from {document_name}.{document_tab}")
     workbook = connection.open(document_name)
+    sheet = None
     try:
-        # Try the index case
-        sheet = workbook.get_worksheet(int(document_tab))
-    except:
+        document_tab = int(document_tab)
+        sheet = workbook.get_worksheet(document_tab)
+    except ValueError:
+        pass
+    if sheet is None:
         sheet = workbook.worksheet(document_tab)
 
     records = sheet.get_all_records()
@@ -203,6 +227,8 @@ def load_remote_account(
             continue
         if 'amount' not in record or not record['amount']:
             continue
+       #if 'account' not in record or not record['account'].strip():
+       #    continue
 
         narration = record.pop('narration', None)
 
@@ -221,7 +247,7 @@ def load_remote_account(
         meta = {
             'filename': str(options['entry_file']),
             'lineno': 0,
-            'document-sheet-row': f"{document_name}/{document_tab}/{row}"
+            'document-sheet-row': f"{document_name}/{document_tab}/{row+1}"
         }
         amount = decimal.Decimal(record.pop('amount')) * m
         currency = record.pop('currency', default_currency)
@@ -231,6 +257,10 @@ def load_remote_account(
                 meta[k] = v
 
         try:
+            if not entry_account:
+                errors.append(f"Skipping Record with Blank Account: {meta['document-sheet-row']}")
+                logger.warning(f"Skipping Record with Blank Account: {meta['document-sheet-row']}")
+                continue
             entry = data.Transaction(
                 date=date,
                 narration=narration,
