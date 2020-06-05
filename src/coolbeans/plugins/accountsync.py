@@ -1,6 +1,5 @@
 # stdlib imports
 import logging
-import pprint
 import re
 import typing
 import datetime
@@ -151,7 +150,7 @@ def remote_accounts(entries, options_map):
             # Meta Attributes set in the Sheet!
             open_entry: data.Open = open_by_account[account]
             sheet_entry: dict = record
-            compare_fields = ('slug', 'account_number', 'institution')
+            compare_fields = ('slug', 'account_number', 'institution', 'document_name', 'document_tab')
             for field in compare_fields:
                 sheet_val = str(sheet_entry[field])
                 if sheet_val and sheet_val != open_entry.meta.get(field, None):
@@ -203,7 +202,6 @@ def remote_accounts(entries, options_map):
         rows.append(row)
     new_sheet = safe_open_sheet(workbook, "Accounts (Missing)")
     new_sheet.update([header]+rows)
-    logger.debug(f"{pprint.pformat(DEBUG_CONTEXT)}")
 
     return entries, []
 

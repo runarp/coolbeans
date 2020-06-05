@@ -6,11 +6,10 @@ Accepts a Bean-File and writes a Yaml file of the records.
 import argparse
 import pathlib
 import logging
-import sys
 import datetime
 import os
 import typing
-
+import json
 import yaml
 import dateparser
 
@@ -18,8 +17,6 @@ from coolbeans.tools.sheets import fetch_sheet, google_connect
 from coolbeans.apps import BEAN_FILE_ENV
 from coolbeans.plugins.sheetsaccount import coolbean_sheets
 from coolbeans.utils import logging_config
-
-import slugify
 
 
 logger = logging.getLogger(__name__)
@@ -43,9 +40,24 @@ def configure_parser(parser):
         help=f"Destination Account Slug",
     )
     parser.add_argument(
+        '--account',
+        type=str,
+        help=f"Account filter rex",
+        default=""
+    )
+    parser.add_argument(
+        '-f', '--format',
+        type=str,
+        choices=('json', 'yaml'),
+        help=f"Output format. Default is json.",
+        default="json"
+    )
+    out_default = os.environ.get("BEAN_INCOMING", None) or pathlib.Path('.').absolute()
+    parser.add_argument(
         '-o', '--output',
-        type=argparse.FileType,
-        help=f"Destination File",
+        type=pathlib.Path,
+        help=f"Destination Folder ({out_default})",
+        default=out_default
     )
     parser.add_argument(
         '-s', '--secrets',
@@ -57,6 +69,12 @@ def configure_parser(parser):
         '-v', '--debug',
         action='store_true',
         default=False
+    )
+    parser.add_argument(
+        '-n', '--dry',
+        action='store_true',
+        help="Dry run",
+        default=False,
     )
 
     default_file = os.environ.get(BEAN_FILE_ENV, None)
@@ -85,31 +103,34 @@ def main():
 
     logging_config(level=logging.DEBUG)
 
-    # Yaml Loader for coolbeans?
-   #if args.debug:
-   #    logging.basicConfig(
-   #        stream=sys.stderr,
-   #        level=logging.DEBUG,
-   #        format="%(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s",
-   #    )
-
-    connection = google_connect(args.secrets)
-
-    header = {
-        'saved': datetime.datetime.today()
-    }
-
     from beancount.loader import load_file
     logger.info(f"Loading {args.bean_file}.")
+
     entries, errors, context = load_file(
         args.bean_file,
         log_errors=logger.error,
         log_timings=logger.info
     )
-    coolbean_sheets(entries, context)
 
+    # Update the context with the names/locations of the sheets we want.
+    # This will add context['coolbean-accounts']
+    coolbean_sheets(entries, context)
+    import re, pprint
+
+    connection = google_connect(args.secrets)
+
+    matches = 0
     for slug, conf in context['coolbean-accounts'].items():
         if args.slug and args.slug != slug:
+            continue
+
+        if args.account:
+            if not re.match(args.account, conf['account'], re.I):
+                continue
+
+        logger.info(f"Fetching {conf['account']} at {conf['document']}/{conf['tab']}")
+        if args.dry:
+            print(f"would fetch {conf['account']} at {conf['document']}/{conf['tab']}")
             continue
 
         records = fetch_sheet(connection, conf['document'], conf['tab'])
@@ -122,14 +143,19 @@ def main():
         if first_date:
             first_str = f".s{first_date.strftime('%Y-%m-%d')}"
 
-
-        # Use this Slug and Conf
+        # Default file_name
         file_name = '.'.join([
-            last_date.strftime('%Y-%m-%d') + first_str,
-            slug,
+            #  last_date.strftime('%Y-%m-%d') + first_str,
+            #  slug,
+            conf['account'].replace(':', '.'),
             'sheet',
-            'yaml'
+            args.format
         ])
+
+        output: pathlib.Path = args.output
+        assert output.is_dir(), f"--output {output} must be a valid directory."
+
+        out_file = output.joinpath(file_name)
 
         document = dict(
             records=records,
@@ -144,8 +170,18 @@ def main():
             currencies=conf['currencies']
         )
 
-        with pathlib.Path(file_name).open("w") as stream:
-            yaml.dump(document, stream=stream)
+        with out_file.open("w") as stream:
+            if args.format == "yaml":
+                yaml.dump(document, stream=stream)
+            elif args.format == "json":
+                json.dump(document, fp=stream, default=str, indent=2)
+        logging.info(f"Wrote {out_file}")
+        matches += 1
+
+    print(f"Matched {matches} accounts.")
+    if not matches:
+        print("Valid Accounts are:")
+        print(pprint.pformat(context['coolbean-accounts'].keys()))
 
 
 def record_range(records:typing.List[dict]):

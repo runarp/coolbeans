@@ -57,6 +57,12 @@ DEFAULT_CURRENCY = "USD"
 logger = logging.getLogger(__name__)
 __plugins__ = ['apply_coolbean_settings', 'remote_entries_plugin']
 
+
+def clean_slug(slug):
+    """Clean a possible Slug string to remove dashes and lower case."""
+    return slug.replace('-', '').lower()
+
+
 def coolbean_sheets(entries, context):
     """Given a set of entries, pull out any slugs and add them to the context"""
     settings = context.setdefault('coolbean-accounts', {})
@@ -67,7 +73,8 @@ def coolbean_sheets(entries, context):
 
             document = entry.meta.get('document_name', None)
             tab = entry.meta.get('document_tab', None)
-            slug = entry.meta.get('slug', None)
+            slug = entry.meta.get('slug', "")
+
             if document and tab and slug:
                 settings[slug] = {
                     'account': entry.account,
@@ -75,8 +82,12 @@ def coolbean_sheets(entries, context):
                     'tab': tab,
                     'currencies': entry.currencies
                 }
+            else:
+                if document or tab:
+                    print(f"Skipping {entry.account}: {document}/{tab}/{slug}")
 
     return entries, []
+
 
 def remote_entries(entries, options_map):
     """
@@ -113,7 +124,6 @@ def remote_entries(entries, options_map):
                 entry_file=new_entries_path
             )
             remote_accounts[entry.account] = options
-    logging.info(f"Collected accounts for checking: {pprint.pformat(remote_accounts)}")
     new_entries = []
     for account, options in remote_accounts.items():
         try:
@@ -139,6 +149,7 @@ remote_entries_plugin = safe_plugin(remote_entries)
 ALIASES = {
     'narration': ['description', 'notes', 'details', 'memo']
 }
+
 
 def clean_record(record: typing.Dict[str, str]):
     """This is a bit of a hack.  But using get_all_records doesn't leave many

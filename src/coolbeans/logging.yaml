@@ -1,6 +1,6 @@
 # YAML File with our default Logging configuration
 version: 1
-disable_existing_loggers: True
+disable_existing_loggers: False
 formatters:
   brief:
     format: '%(message)s'
@@ -18,12 +18,12 @@ handlers:
     formatter: colored_console
     stream  : 'ext://sys.stderr'
 root:
-  level : INFO
+  level : DEBUG
   handlers:
     - console
 loggers:
   coolbeans:
-    level : INFO
+    level : DEBUG
   websockets:
     level: INFO
   urllib3:

@@ -123,8 +123,8 @@ class Entry:
     @property
     def date(self):
         # print(f"{type(self.row)} - {self.row}")
-        # print(f"{self.row.date.split('/')}")
-        d, m, y = map(int, self.row.date.split('/'))
+        # print(f"{self.row.date.split_type('/')}")
+        d, m, y = map(int, self.row.date.split_type('/'))
         return datetime.date(year=y, month=m, day=d)
 
     @property

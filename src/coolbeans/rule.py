@@ -24,7 +24,7 @@ To Transform an entry based on this Rule:
 Open questions:
 
 - Can a Rule modify more than one entry based on a single match?
-- Can a Rule create an Entry?
+- Can a Rule create a Directive?
 
 """
 from __future__ import annotations
@@ -32,13 +32,15 @@ import yaml
 import re
 import pprint
 import logging
-from dataclasses import dataclass, asdict, field
-from typing import List, Optional, Set, Dict, Union, Iterator
+from dataclasses import dataclass, field
+from typing import List, Optional, Set, Iterator
 
 from beancount.core import data
 from beancount.parser import printer
 
+
 logger = logging.getLogger(__name__)
+
 
 KEY_RE = list(map(re.compile, [
     r"^(?P<command>set|match|test)$",
@@ -47,13 +49,16 @@ KEY_RE = list(map(re.compile, [
     r"^(?P<command>set|match|test)-((?P<directive>tx|transaction|posting|pst)-)?(?P<parameter>meta)-(?P<meta_key>.*)$",
 ]))
 
+
 SUB_KEY_RE = list(map(re.compile, [
     r"^(?P<parameter>\w+)$",
     r"^((?P<directive>tx|transaction|posting|pst)-)?(?P<parameter>\w+)$",
     r"^((?P<directive>tx|transaction|posting|pst)-)?(?P<parameter>meta)-(?P<meta_key>.*)$",
 ]))
 
+
 VALID_COMMANDS = ('match', 'set', 'test')
+
 
 TRANSACTION_PARAMETERS = (
     'narration',
@@ -63,6 +68,7 @@ TRANSACTION_PARAMETERS = (
     'links',
     'flag'
 )
+
 
 VALID_FIELDS = [
     'account',
@@ -150,7 +156,7 @@ class MatchRule(DirectiveAttribute):
             for posting in entry.postings:
 
                 # Use the first posting with a '*' flag
-                if posting.flag == '*':
+                if posting.flag != '!' or posting.flag == '*':
                     obj = posting
                     break
             else:
@@ -186,15 +192,17 @@ class MatchRule(DirectiveAttribute):
             elif reg not in history:
                 history[reg] = None
 
+
 MATCH_CHECK = dict()
+
 
 class Rule:
     """
     a Rule object captures a list of match criteria as well as a list
     of "actions".  These can be serialized in a dictionary and applied
     to entries.
-
     """
+
     # Dict (directive, key, meta-key) -> [values]
     match_requirements: dict = None
     set_rules: List[SetRule]
@@ -331,6 +339,7 @@ class Rule:
                 self.upset_match_rule(m)
 
             if da.command == 'set':
+                assert da.value is not None, str(da)
                 self.set_rules.append(
                     SetRule(
                         command='set',
@@ -404,10 +413,13 @@ class Rule:
                             posting = posting._replace(
                                 meta=meta
                             )
-                        else:
+                        elif sr.value is not None:
                             posting = posting._replace(**{
                                 sr.parameter: sr.value
                             })
+                        else:
+                            logger.warning(f"Invalid directive to Set {sr.parameter} to {sr.value} on {posting} for {entry}")
+                            logger.warning(f"{self}")
                         logger.debug(f"New POSTING: {posting}")
                     postings.append(posting)
 
@@ -426,7 +438,7 @@ class Rule:
             postings = []
             for posting in entry.postings:
                 if posting.flag == '!':
-                    posting = posting._replace(flag='*')
+                    posting = posting._replace(flag='')
                 postings.append(posting)
             entry = entry._replace(postings=postings, flag='*')
 

@@ -196,8 +196,10 @@ setup(
     entry_points={  # Optional
         'console_scripts': [
             'cool-match=coolbeans.matcher:main',
+            'cool-price-loader=coolbeans.apps.csvprices:main',
             'cool-organizer=coolbeans.organizer:main',
             'cool-file=coolbeans.apps.filing:main',
+            'cool-check=coolbeans.apps.check:main',
             'cool-web=coolbeans.apps.webrunner:main',
             'cool-sheet-fetch=coolbeans.apps.sheetfetch:main',
         ],

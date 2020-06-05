@@ -2,6 +2,9 @@
 
 CLI to let us use the Statement Filing Plugin
 
+Purely a name-match based filing system.  Reads the "slug" of the file name to decide on the folder without reading
+the contents.  Good for well formatted file names and obtuse data.
+
 """
 # stdlib imports
 import os
@@ -29,6 +32,17 @@ def filing_handler(
         slugs: typing.Dict[str, str],
         dry_run=False
     ):
+    """Recurse through a list of source directories looking for filing matching a regular expression format:
+
+    Args:
+        source_directories (list): Source Folders to search
+        destination: Single target folder, we will create Assests/Liabilities under this
+        slugs: slug dict to use.
+        dry_run: if True we dont' do any real work, just print out details
+
+    Returns:
+
+    """
 
     for folder in source_directories:
         for file in folder.rglob("*"):

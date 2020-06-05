@@ -21,7 +21,9 @@ from beancount.ingest import importer
 from beancount.loader import load_file
 from coolbeans.tools.namematch import expand_file
 
-BEAN_FILE_ENV = 'BEAN_FILE'
+
+BEAN_FILE_ENV:str = 'BEAN_FILE'
+
 
 logger = logging.getLogger(__name__)
 

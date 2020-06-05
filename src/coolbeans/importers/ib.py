@@ -380,7 +380,7 @@ class Importer(importer.ImporterProtocol):
                 # This is a reduction in position, add the Income Account:
                 data.create_simple_posting(
                     entry=txn,
-                    account=self.accounts.get('income', 'Income:Trading:IB'),
+                    account=self.accounts.get('income', 'Income:FIXME'),
                     number=None,
                     currency=None
                 )

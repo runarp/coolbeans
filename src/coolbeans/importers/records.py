@@ -14,7 +14,6 @@ lag) with using Google as a source of information.
 import logging
 import decimal
 import re
-import pprint
 import typing
 import datetime
 import dateparser
@@ -24,12 +23,10 @@ from beancount.ingest import importer, cache
 # 3rdparty imports
 import slugify
 import yaml
+import json
 
 # Beancount imports
 from beancount.core import data
-from coolbeans.utils import safe_plugin, get_setting
-from coolbeans.tools.sheets import google_connect, safe_open_sheet
-from coolbeans.plugins.accountsync import apply_coolbean_settings
 
 
 STRIP_SYMOLS = '₱$'
@@ -47,7 +44,7 @@ ALIASES = {
 class Importer(importer.ImporterProtocol):
     """This is the importer.  We operate on a single file"""
     def name(self):
-        return "yaml.Importer"
+        return "records.Importer"
 
     def identify(self, file: cache._FileMemo):
         # TODO use FileMemo correctly
@@ -71,11 +68,20 @@ class Importer(importer.ImporterProtocol):
         content = self._read_file(name)
         from_date = content['from_date']
         until_date = content['until_date']
-        return f"s{until_date.strftime('%Y-%m-%d')}.{content['slug']}.sheets.yaml"
+        return f"s{until_date.strftime('%Y-%m-%d')}.{content['slug']}.sheets.json"
 
     def _read_file(self, name) -> dict:
-        with pathlib.Path(name).open("r") as stream:
-            content = yaml.full_load(stream)
+        fil = pathlib.Path(name)
+        with fil.open("r") as stream:
+            if fil.suffix == '.yaml':
+                content = yaml.full_load(stream)
+            elif fil.suffix == '.json':
+                content = json.load(stream)
+                # Need to convert from_date and until_date
+                fields = ('from_date', 'until_date')
+                for field in fields:
+                    if content.get('field', None):
+                        content[field] = dateparser.parse(content[field])
             assert 'until_date' in content
         return content
 
@@ -104,9 +110,9 @@ class Importer(importer.ImporterProtocol):
             if 'amount' not in record or not record['amount']:
                 continue
 
-            narration = record.pop('narration', None)
+            narration = record.pop('narration', '')
 
-            payee = record.pop('payee', None)
+            payee = record.pop('payee', '')
 
             tagstr = record.pop('tags', '')
             tags = set(re.split(r'\W+', tagstr)) if tagstr else set()
@@ -131,9 +137,17 @@ class Importer(importer.ImporterProtocol):
             currency = record.pop('currency', default_currency)
             entry_account = record.pop('account')
 
+            meta_target = {}
+            meta_source = {}
+
             for k, v in record.items():
-                if v:
-                    meta[k] = v
+                if not v or not k:
+                    continue
+                clean_key = k.lower().replace('-', '').replace('_', '')
+                if clean_key in ('transferaccount', 'targetaccount'):
+                    meta_target['account'] = record[k]
+                else:
+                    meta_source[k] = v
 
             try:
                 if not entry_account:
@@ -155,16 +169,16 @@ class Importer(importer.ImporterProtocol):
                             units=data.Amount(amount, currency),
                             cost=None,
                             price=None,
-                            flag='*',
-                            meta={}
+                            flag=None,
+                            meta=meta_source
                         ),
                         data.Posting(
                             account=entry_account,
                             units=data.Amount(-amount, currency),
                             cost=None,
                             price=None,
-                            flag='*',
-                            meta={}
+                            flag=None,
+                            meta=meta_target
                         )
                     ]
                 )

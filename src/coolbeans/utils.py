@@ -17,12 +17,16 @@ def get_project_root() -> pathlib.Path:
 def logging_config(config_file=None, level=logging.INFO):
 
     if not config_file:
+        local_file = pathlib.Path('logging.yaml')
+        if local_file.exists():
+            config_file = local_file
+
+    # Fall back to our internal format
+    if not config_file:
         config_file = pathlib.Path(__file__).parent.joinpath("logging.yaml")
 
     config_file = pathlib.Path(config_file)
     assert config_file.exists(), f"Unable to find {config_file}"
-#   if not config_file.exists():
-#       return
 
     with config_file.open("r") as fil:
         config = yaml.full_load(fil)

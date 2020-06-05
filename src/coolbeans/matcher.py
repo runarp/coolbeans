@@ -61,6 +61,7 @@ from dataclasses import dataclass, field
 # Beancount Imports
 from beancount.core import data
 from beancount.core.data import Directive, Entries
+from beancount.core.display_context import DisplayContext
 from beancount.ingest import scripts_utils
 from beancount.ingest.extract import print_extracted_entries
 from beancount.parser.printer import format_entry, print_entries, print_errors
@@ -69,17 +70,23 @@ from beancount.parser.printer import format_entry, print_entries, print_errors
 from coolbeans.utils import safe_plugin
 from coolbeans.rule import Rule, MATCH_CHECK
 
+
 logger = logging.getLogger(__name__)
+
 
 __plugins__ = (
     'apply_coolbean_settings_plugin',
     'match_directives_plugin',
     'generate_new_rules_plugin'
 )
+
+
 __version__ = '1.0'
 
-def apply_coolbean_settings(entries, options_map):
+
+def apply_coolbean_settings(entries:data.Entries, options_map:dict) -> typing.Tuple:
     settings = {}
+
     for entry in entries:
         if isinstance(entry, data.Custom):
             if entry.type == "coolbeans":
@@ -156,14 +163,28 @@ def match_directives(entries, options_map, *args):
             no_match_entries.append(entry)
 
     # We update the "suggestions" file
+
+    dcontext = DisplayContext()
+    dcontext.set_commas(True)
     with output_file.open("w") as outstream:
-        print_entries(
-            mod_entries,
-            file=outstream
-        )
-        logger.info(f"cached: wrote {len(mod_entries)} entries to {output_file}")
+        try:
+            print_entries(
+                mod_entries,
+                file=outstream,
+                dcontext=dcontext
+            )
+            logger.info(f"cached: wrote {len(mod_entries)} entries to {output_file}")
+        except Exception as exc:
+            logger.exception('while printing entries.  ')
+            try:
+                for entry in mod_entries:
+                    print_entries([entry], file=sys.stderr)
+            except Exception:
+                logger.exception(f"{entry}")
+                raise
 
     return new_entries, []
+
 
 @dataclass
 class PossibleRule:
@@ -297,8 +318,12 @@ def generate_new_rules(entries, options_map):
 
     return entries, []
 
+
 match_directives_plugin = safe_plugin(match_directives)
+
+
 generate_new_rules_plugin = safe_plugin(generate_new_rules)
+
 
 def generate_new_rules_file(entries, options_map):
     """Let's find unmatched Entries and generate a rules file."""
@@ -326,6 +351,7 @@ def rule_from_meta(entry: data.Transaction) -> Rule:
 
     logger.info(f"Created a Fancy Rule: {rs} -> {repr(r)}")
     return r
+
 
 @dataclass
 class Match:
@@ -392,7 +418,7 @@ class Matcher:
     def expand_set_fields(self, rule) -> Iterator:
         result = {}
         for key, value in rule.items():
-            command, *params = key.split('-')
+            command, *params = key.split_type('-')
             if command != 'set':
                 continue
 
@@ -445,7 +471,7 @@ class Matcher:
                     meta_name = field[5:]
                     entry.meta[meta_name] = value
 
-        match['entry'] = entry
+        match.entry = entry
 
     def process(self, existing_entries):
         results = []
