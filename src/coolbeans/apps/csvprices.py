@@ -2,6 +2,16 @@
 SYMBOL,YYYY-MM-DD,PRICE,.*
 
 It ignores any further columns.  These are compared against an existing bean file so duplicates are removed.
+
+Usage:
+
+In order to load a csv to the "end" of an existing prices.bean
+
+    cool-price-loader -e prices.bean BTCData.csv -o prices.bean
+
+TODO:
+    Support JSON
+    Support YAML
 """
 
 from coolbeans.utils import logging_config

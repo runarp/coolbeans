@@ -4,8 +4,8 @@ CLI to let us use the Statement Filing Plugin
 
 Purely a name-match based filing system.  Reads the "slug" of the file name to decide on the folder without reading
 the contents.  Good for well formatted file names and obtuse data.
-
 """
+
 # stdlib imports
 import os
 import sys
@@ -17,7 +17,6 @@ import typing
 
 # beancount imports
 from beancount.loader import load_file
-from beancount.parser import printer
 
 from coolbeans.tools.namematch import expand_file
 from coolbeans.apps import BEAN_FILE_ENV
@@ -31,7 +30,7 @@ def filing_handler(
         destination: pathlib.Path,
         slugs: typing.Dict[str, str],
         dry_run=False
-    ):
+        ):
     """Recurse through a list of source directories looking for filing matching a regular expression format:
 
     Args:
@@ -41,7 +40,7 @@ def filing_handler(
         dry_run: if True we dont' do any real work, just print out details
 
     Returns:
-
+        None -- Moves files instead
     """
 
     for folder in source_directories:
@@ -54,7 +53,8 @@ def filing_handler(
             if not account:
                 account = slugs.get(match.slug.replace('-', ''), None)
             if not account:
-                logger.info(f"Unable to find matching account for slug {match.slug}. [{match.file}]\n{pprint.pformat(slugs)}")
+                logger.info(f"Unable to find matching account for slug {match.slug}. [{match.file}]"
+                            f"\n{pprint.pformat(slugs)}")
                 continue
 
             sub_directory = account.replace(':', '/')
@@ -69,7 +69,7 @@ def filing_handler(
                 continue
 
             # Rename duplicate files
-            possible_target:pathlib.Path = target_file
+            possible_target: pathlib.Path = target_file
             sep = '.'
             while possible_target.exists():
                 print(f"Found matching file {possible_target}")
@@ -92,7 +92,6 @@ def filing_handler(
                     print(f"DRY: mkdir {target_directory}")
                 logger.info(f"DRY: mv {file} -> {possible_target}")
                 print(f"mv {file} -> {possible_target}")
-
 
 
 def configure_parser(parser):
