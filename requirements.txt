@@ -1,8 +1,19 @@
 -e .
 beancount
-ibflex
+fava
+
+ibflex~=0.14
 ofxtools
 pyyaml
-python-slugify
+slugify
+
+# python-slugify
 gspread
 oauth2client
+
+argparse
+dateparser
+google-api-python-client~=1.9.1
+openpyxl~=3.0.3
+
+# pandas~=1.0.4
